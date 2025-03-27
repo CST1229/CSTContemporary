@@ -1,23 +1,9 @@
+<!DOCTYPE html>
 <html>
 <head>
-	<title>CST Stone Simulator</title>
+	<title>CST Cont.</title>
 	<meta charset="utf-8">
-	<!-- 
-		HTA's Ultimatum:
-		You either go IE11 and lose the icon,
-		or go IE8 but have an icon.
-		I'm fairly sure IE8 doesn't even have canvas
-		so there is basically only one option...
-	-->
-	<HTA:APPLICATION
-		ID="oHTA"
-		APPLICATIONNAME="CST Stone Simulator"
-		ICON="assets/icon.ico"
-		NAVIGABLE="false"
-		WINDOWSTATE="maximize"
-	/>
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<meta http-equiv="X-UA-Compatible" content="ie=11">
+	<meta name="viewport" content="width=device-width, initial-scale=1"> 
 	<link rel="icon" href="./assets/icon.ico">
 </head>
 
@@ -35,92 +21,15 @@
 
 <div id="debug" style="display: none;">
 	<center><p>FPS: <span id="fps">N/A</span></p></center>
-	<textarea id="input" rows="1" cols="50" style="overflow: auto;"></textarea>
-	<button id="button">run</button>
-	<pre id="output" style="white-space: pre-wrap;"></pre>
-
-	<h2>Console</h2>
-	<pre id="console" style="white-space: pre-wrap;"></pre>
 </div>
 
 <script>
 	const DEBUG = false;
-	
-	const globalThis = window;
-	const inp = document.getElementById("input");
-	const btn = document.getElementById("button");
-	const out = document.getElementById("output");
-	const cons = document.getElementById("console");
-	const history = [];
-	let historyIndex = 0;
-	const MAX_HISTORY_LENGTH = 100;
-	
 	if (DEBUG) document.getElementById("debug").setAttribute("style", "");
-
-	let console = {
-		log: function(val) {
-			let el = document.createElement("div");
-			el.innerText = val;
-			cons.appendChild(el);
-		},
-		clear: function(val) {
-			cons.innerHTML = "";
-		}
-	};
-
-	function keys(obj) {
-		let keys = "";
-		for (let key in obj) keys += key + ", ";
-		return keys;
-	}
-	
-	inp.oninput = function(event) {
-		const lines = inp.value.split("\n");
-		inp.rows = lines.length;
-		let maxW = 50;
-		for (let i = 0; i < lines.length; i++) maxW = Math.max(maxW, lines[i].length);
-		inp.cols = maxW;
-	};
-	inp.onkeydown = function(event) {
-		if (event.key === "Enter" && !event.shiftKey) {
-			btn.click();
-			if (!event.ctrlKey) {
-				inp.value = "";
-				inp.oninput();
-			}
-			event.preventDefault();
-		} else if (event.ctrlKey && event.key.toLowerCase() === "r") {
-			// clear button
-			console.clear();
-			event.preventDefault();
-		} else if (event.ctrlKey && event.key === "Up" || event.key === "PageUp") {
-			historyIndex = Math.max(historyIndex - 1, 0);
-			inp.value = history[historyIndex] || "";
-		} else if (event.ctrlKey && event.key === "Down" || event.key === "PageDown") {
-			historyIndex = Math.min(historyIndex + 1, history.length);
-			inp.value = history[historyIndex] || "";
-		}
-	};
-	out.innerText = "Output goes here";
-	btn.onclick = function() {
-		history.push(inp.value);
-		if (history.length > MAX_HISTORY_LENGTH) {
-			history.shift();
-		}
-		historyIndex = history.length;
-		try {
-			out.innerText = eval(inp.value);
-		} catch(e) {
-			out.innerText = "ERROR: " + e;
-		}
-	};
-	
-	
-	
-	
 	
 	// the game itself
 	
+	// Assets and constants
 	// assets are filled in with Images by the loader
 	const assets = {
 		player1: 0,
@@ -134,7 +43,8 @@
 		tile: 1,
 		unbreakable: 2,
 	};
-		
+	
+	
 	// utility functions
 	const flr = Math.floor;
 	const flrto = function(val, to) {
@@ -149,6 +59,8 @@
 	};
 	const ceil = Math.ceil;
 	
+	
+	// Canvas stuff
 	const gameContainer = document.getElementById("gameContainer");
 	const canv = document.getElementById("canvas");
 	const sw = 640;
@@ -158,7 +70,6 @@
 	canv.style.background = "black";
 	
 	const ctx = canv.getContext("2d");
-	
 	let resizedThisFrame = false;
 	function resizeGame() {
 		if (!DEBUG) {
@@ -186,6 +97,7 @@
 	}
 	
 	
+	// Input
 	const buttons = new Set();
 	const buttonsJust = new Set();
 	const modernKeyToIEKey = {
@@ -233,6 +145,26 @@
 	const pressed = buttons.has.bind(buttons);
 	const justPressed = buttonsJust.has.bind(buttonsJust);
 	
+	let mouseX = null;
+	let mouseY = null;
+	let mouseDown = false;
+	let rightMouseDown = false;
+	let middleMouseDown = false;
+	function updateMouse(e) {
+		const canvasRect = canvas.getBoundingClientRect();
+		mouseX = flrto((e.clientX - canvasRect.x) / canvasRect.width * sw, 0.0001);
+		mouseY = flrto((e.clientY - canvasRect.y) / canvasRect.height * sh, 0.0001);
+		mouseDown = e.buttons & 0b1;
+		rightMouseDown = e.buttons & 0b10;
+		middleMouseDown = e.buttons & 0b100;
+	}
+	window.addEventListener("mousedown", updateMouse);
+	window.addEventListener("mouseup", updateMouse);
+	window.addEventListener("mousemove", updateMouse);
+	canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+	
+	
+	// Level generation
 	// fill an array
 	function fill(arr, val) {
 		for (let i = 0; i < arr.length; i++) arr[i] = val;
@@ -241,19 +173,32 @@
 	const TILE_SIZE = 32;
 	const GEN_FACTOR = 300;
 	const GEN_YOFF = 400;
+	
+	let editor = false;
 	let tmh = 200; // tilemap height
 	let tmw = 150; // tilemap width
-	let gameLength = "Medium";
 	let tilemap;
-	function genLevel(random) {
-		tilemap = fill(new Array(tmh)).map(function(v, i) {
-			return fill(new Array(tmw)).map(function() {
-				if (random && i > 0) return Math.floor(Math.random() * (i + GEN_YOFF) / GEN_FACTOR) ? tile.tile : tile.none;
-				return tile.none;
+	let gameLength = "Medium";
+	function genLevel(type) {
+		if (type === "random")
+			tilemap = fill(new Array(tmh)).map(function(v, i) {
+				return fill(new Array(tmw)).map(function() {
+					if (i > 0) return Math.floor(Math.random() * (i + GEN_YOFF) / GEN_FACTOR) ? tile.tile : tile.none;
+					return tile.none;
+				});
 			});
-		});
+		else if (type === "flat")
+			tilemap = fill(new Array(tmh)).map(function(v, i) {
+				return fill(new Array(tmw)).map(function() {
+					if (i < (tmh - 1)) return tile.none;
+					return tile.tile;
+				});
+			});
+		else
+			tilemap = fill(new Array(tmh)).map(function(v, i) {
+				return fill(new Array(tmw), tile.none);
+			});
 	}
-	
 	const lengthHeights = {
 		Tiny: 50,
 		Short: 100,
@@ -270,6 +215,34 @@
 	};
 	const gameLengths = Object.keys(lengthHeights);
 	
+	
+	// Level storage
+	let levels = [];
+	levels.push({name: "Test Level",
+		tilemap: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,1,1]]
+	});
+	try {
+		const levArr = JSON.parse(localStorage.getItem("levels"));
+		if (Array.isArray(levArr)) levels = levArr;
+	} catch(e) {}
+	
+	function saveLevels() {
+		saveLevel();
+		localStorage.setItem("levels", JSON.stringify(levels));
+	}
+	let level = null;
+	function saveLevel() {
+		if (!level || !tilemap) return;
+		level.tilemap = structuredClone(tilemap);
+	}
+	function loadLevel(lvl) {
+		level = lvl;
+		tmh = lvl.tilemap.length;
+		tmw = (lvl.tilemap[0] || []).length;
+		tilemap = structuredClone(lvl.tilemap);
+	}
+	
+	// Tile utils
 	// world x, world y
 	function tileAt(wx, wy, oobTile) {
 		const tx = flr(wx / TILE_SIZE);
@@ -290,7 +263,21 @@
 		return tilemap[ty][tx] = tile;
 	}
 	
+	
+	// Objects
 	const objs = [];
+	function deleteAllObjs() {
+		objs.forEach(o => {
+			if (o.dispose) o.dispose();
+		});
+		objs.length = 0;
+	}
+	function deleteObj(o) {
+		if (o.dispose) o.dispose();
+		const index = objs.indexOf(o);
+		if (index >= 0) objs.splice(index, 1);
+	}
+	
 	function Player(timer) {
 		this.x = 0;
 		this.y = 0;
@@ -364,17 +351,21 @@
 				const tx = flr((this.x + w/2) / TILE_SIZE);
 				const ty = ceil((this.y + h/2) / TILE_SIZE);
 				if (this.storedBlocks > 0) {
-					if (!getTile(tx, ty, tile.unbreakable)) {
-						setTile(tx, ty, 1);
+					if (!getTile(tx, ty, tile.unbreakable) || pressed("down")) {
+						if (pressed("down") && getTile(tx, ty, tile.unbreakable)) {
+							setTile(tx, ty, tile.none);
+							this.vsp = jumpSpeed * Math.sqrt(2);
+						} else
+							setTile(tx, ty, tile.tile);
 						this.storedBlocks--;
 					} else if (!getTile(tx, ty - 1, tile.unbreakable) && !getTile(tx, ty - 2, tile.unbreakable)) {
-						setTile(tx, ty - 1, 1);
+						setTile(tx, ty - 1, tile.tile);
 						this.storedBlocks--;
 						// snap to the block we just placed
 						this.y = (ty - 1) * TILE_SIZE - h;
 					}
 				} else if (getTile(tx, ty) && this.falling == 0) {
-					setTile(tx, ty, 0);
+					setTile(tx, ty, tile.none);
 					this.storedBlocks++;
 					this.falling = 999;
 				}
@@ -384,9 +375,16 @@
 			camY = this.y + h/2 - sh/2;
 			
 			if (this.y >= (tmh * TILE_SIZE - h)) {
-				objs.splice(objs.indexOf(this), 1);
+				deleteObj(this);
 				if (timer) timer.stopped = true;
 				objs.push(new WinText());
+			}
+			if (justPressed("0")) {
+				queueMicrotask(() => {
+					editor = true;
+					loadLevel(level);
+					startGame();
+				});
 			}
 		};
 		this.draw = function(ctx) {
@@ -399,7 +397,6 @@
 			ctx.drawImage(assets["player" + frame], -4, -8, 32, 32);
 		};
 	}
-	
 	function WinText() {
 		this.isGUI = true;
 		this.draw = function(ctx) {
@@ -409,17 +406,16 @@
 			ctx.font = "bold 64px sans-serif";
 			
 			ctx.fillText(
-				"You Win!",
+				"You Have Not Win!",
 				sw/2, sh/2-48
 			);
 			ctx.font = "32px sans-serif";
 			ctx.fillText(
-				"(Pause -> New Game to restart)",
+				"(You... DIED!!!)",
 				sw/2, sh/2+16
 			);
 		};
 	}
-	
 	function Timer() {
 		this.time = 0;
 		this.stopped = false;
@@ -460,8 +456,72 @@
 			}
 		};
 	}
+	function Editor() {
+		let scrolledX = 0;
+		let scrolledY = 0;
+		let lastMouseX = mouseX;
+		let lastMouseY = mouseY;
+		
+		// 2-finger touch scrolling, mainly
+		function onScroll(e) {
+			if (paused) return;
+			scrolledX += e.deltaX / gameScale;
+			scrolledY += e.deltaY / gameScale;
+		}
+		canvas.addEventListener("wheel", onScroll);
+		
+		const moveSpeed = TILE_SIZE * 15;
+		this.step = function(dt) {
+			const joystickX = pressed("right") - pressed("left");
+			const joystickY = pressed("down") - pressed("up");
+			camX += joystickX * dt * moveSpeed + scrolledX;
+			camY += joystickY * dt * moveSpeed + scrolledY;
+			if (mouseX != null && mouseY != null && middleMouseDown) {
+				camX += lastMouseX - mouseX;
+				camY += lastMouseY - mouseY;
+			}
+			[camX, camY] = getClampedCameraPos(false);
+			scrolledX = 0;
+			scrolledY = 0;
+			lastMouseX = mouseX;
+			lastMouseY = mouseY;
+			
+			if (mouseDown || rightMouseDown) {
+				const tl = rightMouseDown ? tile.none : tile.tile;
+				const [cx, cy] = getClampedCameraPos();
+				const tx = flr((cx + mouseX) / TILE_SIZE);
+				const ty = flr((cy + mouseY) / TILE_SIZE);
+				setTile(tx, ty, tl);
+			}
+			
+			if (justPressed("0")) {
+				queueMicrotask(() => {
+					editor = false;
+					saveLevels();
+					startGame();
+				});
+			}
+		};
+		
+		this.dispose = function() {
+			canvas.removeEventListener("scroll", onScroll);
+		};
+	}
 	
-	
+	function getClampedCameraPos(rounded = true) {
+		const borderW = editor ? sw/2 : 0;
+		const borderH = editor ? sh/2 : 0;
+		
+		let eCamX = Math.min(camX, Math.max(tmw * TILE_SIZE - sw, 0) + borderW);
+		let eCamY = Math.min(camY, Math.max(tmh * TILE_SIZE - sh, 0) + borderH);
+		if (rounded) {
+			eCamX = flrto(eCamX, gameScaleInverse);
+			eCamY = flrto(eCamY, gameScaleInverse);
+		}
+		eCamX = Math.max(eCamX, -borderW);
+		eCamY = Math.max(eCamY, -borderH);
+		return [eCamX, eCamY];
+	}
 	
 	let camX = 0;
 	let camY = 0;
@@ -474,17 +534,30 @@
 		ctx.save();
 		try {
 			// effective camera position
-			let eCamX = Math.max(flrto(camX, gameScaleInverse), 0);
-			let eCamY = Math.max(flrto(camY, gameScaleInverse), 0);
-			eCamX = Math.min(eCamX, tmw * TILE_SIZE - sw);
-			eCamY = Math.min(eCamY, tmh * TILE_SIZE - sh);
+			const [eCamX, eCamY] = getClampedCameraPos();
 			ctx.translate(-eCamX, -eCamY);
 			
+			// level border
+			if (editor && !onTitle) {
+				ctx.fillStyle = "#000";
+				ctx.globalAlpha = 0.25;
+				
+				const bw = sw*2;
+				const bh = sh*2;
+				ctx.fillRect(-bw, -bh, bw, tmh * TILE_SIZE + bh * 2); // left
+				ctx.fillRect(0, -bh, tmw * TILE_SIZE, bh);  // top
+				ctx.fillRect(tmw * TILE_SIZE, -bh, bw, tmh * TILE_SIZE + bh * 2); // right
+				ctx.fillRect(0, tmh * TILE_SIZE, tmw * TILE_SIZE, bh);  // bottom
+				
+				ctx.globalAlpha = 1;
+			}
+			
+			// tilemap
 			ctx.fillStyle = "#448";
 			let minx = flr(eCamX / TILE_SIZE, gameScaleInverse), maxx = minx + ceil(sw / TILE_SIZE) + 1;
 			for (let miny = flr(eCamY / TILE_SIZE, gameScaleInverse), y = miny, maxy = miny + ceil(sh / TILE_SIZE) + 1 ; y < maxy; y++) {
 				if (!tilemap[y]) continue;
-				for (x = minx; x < maxx; x++) {
+				for (let x = minx; x < maxx; x++) {
 					if (tilemap[y][x])
 						ctx.drawImage(assets.stone, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
 				}
@@ -507,9 +580,9 @@
 				ctx.fillStyle = "white";
 				ctx.textAlign = "left";
 				ctx.textBaseline = "top";
-				ctx.font = "12px sans-serif";
+				ctx.font = "11px sans-serif";
 				ctx.fillText(
-					"DEBUG",
+					"DEBUG - mouse: " + mouseX + " " + mouseY,
 					2, 2
 				);
 			}
@@ -544,32 +617,191 @@
 		resizedThisFrame = false;
 	}
 	
+	
 	let paused = false;
-	let pauseMenu = null;
-	let pauseIndex = 0;
+	let pauseMenus = [];
+	function Menu(menu = []) {
+		this.index = 0;
+		this.inescapable = false;
+		if (menu.items) {
+			// this is a menu object
+			Object.assign(this, menu);
+		} else {
+			this.items = menu;
+		}
+	}
+	function pauseSubmenu(items = []) {
+		if (!paused) pauseMenus.length = 0;
+		paused = true;
+		
+		if (items instanceof Function) items = items();
+		const menu = new Menu(items);
+		pauseMenus.push(menu);
+		return menu;
+	}
+	
+	const MenuOption = {
+		back: ["Back"],
+		gameLength: [() => "Game Length: " + gameLength, () => {
+			let index = gameLengths.indexOf(gameLength) + 1;
+			if (index >= gameLengths.length) index = 0;
+			gameLength = gameLengths[index];
+			return true;
+		}],
+		levels: [() => onTitle ? "Level Editor..." : "Levels...", () => {
+			saveLevels();
+			return pauseSubmenu(Menu.levels);
+		}],
+		stoneSimulator: ["Stone Simulator...", () => pauseSubmenu([MenuOption.back, MenuOption.gameLength])],
+	}
+	
+	Menu.title = {inescapable: true, items: [
+		/*["Start", () => {
+			editor = false;
+			startGame(true);
+		}],*/
+		MenuOption.levels,
+		//MenuOption.stoneSimulator,
+		["Links...",
+			() => pauseSubmenu([
+				MenuOption.back,
+				["Made by CST1229", () => {
+					setTimeout(() => {
+						window.open("https://cst1229.eu.org/", "_blank");
+					}, 100);
+					return true;
+				}],
+				["Source Code", () => {
+					setTimeout(() => {
+						window.open("https://github.com/CST1229/StoneSimulator/", "_blank");
+					}, 100);
+					return true;
+				}],
+				["Play CST Stone Simulator!", () => {
+					setTimeout(() => {
+						window.open("https://cst1229.github.io/StoneSimulator", "_blank");
+					}, 100);
+					return true;
+				}],
+			]),
+		],
+		["Quit", () => {
+			window.close();
+		}],
+	]};
+	Menu.pause = [
+		["Continue"],
+		/*["New Game", () => {
+			startGame(true);
+		}],*/
+		["Edit (0)", () => {
+			editor = true;
+			startGame();
+		}],
+		MenuOption.levels,
+		//MenuOption.stoneSimulator,
+		["Exit", () => {
+			saveLevels();
+			titleScreen();
+			return true;
+		}],
+	];
+	Menu.pauseEditor = [
+		["Continue"],
+		["Playtest (0)", () => {
+			editor = false;
+			saveLevels();
+			startGame();
+		}],
+		["Level Properties...", () => pauseSubmenu([
+				MenuOption.back,
+				[() => ("Level Name: " + ((level && level.name) ? level.name : "WHAT")), () => {
+					const name = prompt("Name?", level.name);
+					if (!name) return true;
+					level.name = name;
+					saveLevels();
+					return true;
+				}],
+				["Resize Level", () => {
+					const w = flr(+(prompt("Width...", tmw)) || 0);
+					if (w <= 0 || !isFinite(w)) return true;
+					const h = flr(+(prompt("Height...", tmh)) || 0);
+					if (h <= 0 || !isFinite(h)) return true;
+					if (h > tmh) {
+						for (let i = tmh; i < h; i++) tilemap.push(fill(new Array(tmw), tile.none));
+					} else if (h < tmh) {
+						for (let i = tmh; i > h; i--) tilemap.pop();
+					}
+					if (w > tmw) {
+						for (let i = tmw; i < w; i++) tilemap.forEach(t => t.push(tile.none));
+					} else if (w < tmw) {
+						for (let i = tmw; i > w; i--) tilemap.forEach(t => t.pop());
+					}
+					tmw = w;
+					tmh = h;
+					return true;
+				}],
+				["Clear Level", () => {
+					if (confirm("Are you sure you want to clear this level?")) {
+						genLevel();
+						startGame();
+					}
+					return true;
+				}],
+				["Delete Level", () => {
+					if (confirm("Are you sure you want to delete this level?")) {
+						levels.splice(levels.indexOf(level), 1);
+						level = null;
+						saveLevels();
+						titleScreen();
+						return "back";
+					}
+					return true;
+				}],
+			]),
+		],
+		MenuOption.levels,
+		["Exit", () => {
+			titleScreen();
+			return "back";
+		}],
+	];
+	Menu.levels = () => {
+		const items = levels.map(l => [l.name, () => {
+			editor = true;
+			loadLevel(l);
+			startGame();
+			exitPause();
+		}]);
+		items.unshift(MenuOption.back, ["New Level...", () => {
+			const name = prompt("Name?");
+			if (!name) return true;
+			queueMicrotask(() => {
+				editor = true;
+				exitPause();
+				
+				tmh = 15;
+				tmw = 25;
+				
+				level = {name, tilemap: []};
+				genLevel("flat");
+				
+				levels.push(level);
+				saveLevels();
+				startGame();
+			});
+		}]);
+		return items;
+	};
+	
 	let isFullscreen = false;
 	let onTitle = false;
 	function enterPause() {
-		paused = true;
-		pauseIndex = 0;
-		pauseMenu = [
-			["Continue", function() {}],
-			["New Game", function() {
-				startGame();
-			}],
-			[function() {
-				return "Game Length: " + gameLength;
-			}, function() {
-				let index = gameLengths.indexOf(gameLength) + 1;
-				if (index >= gameLengths.length) index = 0;
-				gameLength = gameLengths[index];
-				return true;
-			}],
-			["Exit", function() {
-				titleScreen();
-				return true;
-			}],
-		];
+		pauseSubmenu(editor ? Menu.pauseEditor : Menu.pause);
+	}
+	function exitPause() {
+		paused = false;
+		pauseMenus.length = 0;
 	}
 	function drawPause() {
 		let cx = 16;
@@ -578,120 +810,87 @@
 		ctx.textAlign = "left";
 		ctx.textBaseline = "top";
 		
+		const menu = pauseMenus[pauseMenus.length - 1];
+		
 		if (onTitle) {
 			ctx.font = "bold 48px sans-serif";
 			ctx.fillText(
-				"CST Stone Simulator",
+				"CST Contemporary",
 				cx, cy, sw
 			);
 			cy += 64;
 		}
 		
-		for (let _i in pauseMenu) {
+		for (let _i in menu.items) {
 			const i = +_i;
 			const fontSize = 28;
-			if (pauseIndex !== i) {
+			if (menu.index !== i) {
 				ctx.font = fontSize + "px sans-serif";
 			} else {
 				ctx.font = "bold "+fontSize+"px sans-serif";
 			}
-			let text = pauseMenu[i][0];
+			let text = menu.items[i][0];
 			if (typeof text !== "string") text = text();
 			ctx.fillText(
-				(pauseIndex === i ? "> " : "  ") +
+				(menu.index === i ? "> " : "  ") +
 				text,
-				cx, cy, sw
+				cx, cy, sw - cx*2
 			);
 			cy += fontSize;
 		}
-		
-		if (onTitle) {
-			const description = "Get to the bottom of the Cave of Inexplicably Detailed Uniform Rocks." 
-				+ "\nArrow keys to move."
-				+ "\nSpace to pick up/place the block below you."
-				+ "\nEnter/Esc to pause."
-				+ "\nThere is less empty space deep down, so longer games are harder."
-				+ "\n\n" + gameLength + " games are around " + gameTimes[gameLength] + " seconds long and are " + lengthHeights[gameLength] + " blocks tall.";
-			cx = 16;
-			cy = sh/2 + 16;
-			
-			const fontSize = 20;
-			ctx.font = fontSize+"px sans-serif";
-			const lines = description.split("\n");
-			lines.forEach(function(line) {
-				ctx.fillText(
-					line,
-					cx, cy, sw
-				);
-				cy += fontSize;
-			});
-		}
 	}
 	function stepPause() {
-		if (justPressed("enter") || justPressed("spacebar") || (!onTitle && justPressed("esc"))) {
-			if (justPressed("esc")) pauseIndex = 0;
-			if (!pauseMenu[pauseIndex][1]()) {
-				paused = false;
-				pauseMenu = null;
+		const menu = pauseMenus[pauseMenus.length - 1];
+		if (justPressed("up"))
+			menu.index = Math.max(menu.index - 1, 0);
+		if (justPressed("down"))
+			menu.index = Math.min(menu.index + 1, menu.items.length - 1);
+		if (justPressed("enter") || justPressed("spacebar") || (!menu.inescapable && justPressed("esc"))) {
+			if (justPressed("esc")) menu.index = 0;
+			let returnVal = menu.items[menu.index][1];
+			if (returnVal instanceof Function) returnVal = returnVal();
+			if (paused) {
+				if (!returnVal) {
+					pauseMenus.pop();
+				} else if (returnVal === "back") {
+					const index = pauseMenus.indexOf(menu);
+					if (index >= 0) pauseMenus.splice(index, 1);
+				}
+				if (!pauseMenus.length) exitPause();
 			}
 		}
-		if (justPressed("up"))
-			pauseIndex = Math.max(pauseIndex - 1, 0);
-		if (justPressed("down"))
-			pauseIndex = Math.min(pauseIndex + 1, pauseMenu.length - 1);
 	}
 	
 	function titleScreen() {
 		onTitle = true;
-		objs.length = 0;
+		editor = false;
+		deleteAllObjs();
+		level = null;
 		tmw = 1;
 		tmh = 1;
-		genLevel(false);
+		genLevel();
 		
-		paused = true;
-		pauseIndex = 0;
-		pauseMenu = [
-			["Start", function() {
-				startGame();
-			}],
-			[function() {
-				return "Game Length: " + gameLength;
-			}, function() {
-				let index = gameLengths.indexOf(gameLength) + 1;
-				if (index >= gameLengths.length) index = 0;
-				gameLength = gameLengths[index];
-				return true;
-			}],
-			["Made by CST1229", function() {
-				setTimeout(function() {
-					window.open("https://cst1229.eu.org/", "_blank");
-				}, 100);
-				return true;
-			}],
-			["Source Code", function() {
-				setTimeout(function() {
-					window.open("https://github.com/CST1229/StoneSimulator/", "_blank");
-				}, 100);
-				return true;
-			}],
-			["Quit", function() {
-				window.close();
-			}],
-		];
+		pauseSubmenu(Menu.title);
 	}
-	function startGame() {
+	function startGame(stoneSim = false) {
 		onTitle = false;
-		objs.length = 0;
+		deleteAllObjs();
 		camX = 0;
 		camY = 0;
 		
-		tmw = 50;
-		tmh = lengthHeights[gameLength];
-		genLevel(true);
-		
-		const timer = new Timer();
-		objs.push(new Player(timer));
-		objs.push(timer);
+		if (editor) {
+			objs.push(new Editor());
+		} else {
+			let timer;
+			if (stoneSim) {
+				timer = new Timer();
+				tmw = 50;
+				tmh = lengthHeights[gameLength];
+				genLevel("random");
+			}
+			objs.push(new Player(timer));
+			if (timer) objs.push(timer);
+		}
 	}
 	
 	
@@ -731,7 +930,7 @@
 	
 	Object.keys(assets).forEach(function(key) {
 		allAssets++;
-		const filename = "./assets/" + key + ".png";
+		const filename = "./sprites/" + key + ".png";
 		const img = new Image();
 		img.src = filename;
 		assets[key] = img;
@@ -759,9 +958,15 @@
 		gameContainer.style = "display: grid; width: 100%; height: 100%; place-items: center;";
 		document.documentElement.style.margin = "0";
 		document.body.style.margin = "0";
-		document.body.style.overflow = "none";
+		//document.body.style.overflow = "none";
+		document.documentElement.style.width = "100%";
+		document.documentElement.style.height = "100%";
+		document.body.style.width = "100%";
+		document.body.style.height = "100%";
 		canv.style.minWidth = "0";
 		canv.style.minHeight = "0";
+		canv.style.maxWidth = "100%";
+		canv.style.maxHeight = "100%";
 	}
 	resizeGame();
 	draw();
