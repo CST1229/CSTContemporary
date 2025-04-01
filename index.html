@@ -19,13 +19,8 @@
 	<canvas width="800" height="600" id="canvas">game</canvas>
 </center>
 
-<div id="debug" style="display: none;">
-	<center><p>FPS: <span id="fps">N/A</span></p></center>
-</div>
-
 <script>
-	const DEBUG = false;
-	if (DEBUG) document.getElementById("debug").setAttribute("style", "");
+	const DEBUG = true;
 	
 	// the game itself
 	
@@ -36,13 +31,18 @@
 		player2: 0,
 		player3: 0,
 		player4: 0,
-		stone: 0,
+		errortile: 0,
 	};
 	const tile = {
 		none: 0,
 		tile: 1,
 		unbreakable: 2,
+		gold: 3,
 	};
+	const MAX_TILES = Math.max(...Object.values(tile));
+	for (let i = 1; i <= MAX_TILES; i++) {
+		assets["tile" + i] = 0;
+	}
 	
 	
 	// utility functions
@@ -57,6 +57,7 @@
 	const sign = function(val) {
 		return val > 0 ? 1 : (val < 0 ? -1 : 0);
 	};
+	const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 	const ceil = Math.ceil;
 	
 	
@@ -72,22 +73,20 @@
 	const ctx = canv.getContext("2d");
 	let resizedThisFrame = false;
 	function resizeGame() {
-		if (!DEBUG) {
-			if (resizedThisFrame) return;
-			const w = window.innerWidth;
-			const h = window.innerHeight;
-			if (w / h > sw / sh) {
-				gameScale = Math.max(h / sh, 1);
-				canv.style.width = "auto";
-				canv.style.height = "100%";
-			} else {
-				gameScale = Math.max(w / sw, 1);
-				canv.style.width = "100%";
-				canv.style.height = "auto";
-			}
-			gameScale *= window.devicePixelRatio || 1;
-			resizedThisFrame = true;
+		if (resizedThisFrame) return;
+		const w = window.innerWidth;
+		const h = window.innerHeight;
+		if (w / h > sw / sh) {
+			gameScale = Math.max(h / sh, 1);
+			canv.style.width = "auto";
+			canv.style.height = "100%";
+		} else {
+			gameScale = Math.max(w / sw, 1);
+			canv.style.width = "100%";
+			canv.style.height = "auto";
 		}
+		gameScale *= window.devicePixelRatio || 1;
+		resizedThisFrame = true;
 		canv.width = ceil(sw * gameScale);
 		canv.height = ceil(sh * gameScale);
 		draw();
@@ -147,16 +146,20 @@
 	
 	let mouseX = null;
 	let mouseY = null;
-	let mouseDown = false;
-	let rightMouseDown = false;
-	let middleMouseDown = false;
 	function updateMouse(e) {
 		const canvasRect = canvas.getBoundingClientRect();
 		mouseX = flrto((e.clientX - canvasRect.x) / canvasRect.width * sw, 0.0001);
 		mouseY = flrto((e.clientY - canvasRect.y) / canvasRect.height * sh, 0.0001);
-		mouseDown = e.buttons & 0b1;
-		rightMouseDown = e.buttons & 0b10;
-		middleMouseDown = e.buttons & 0b100;
+		
+		const lmb = e.buttons & 0b1;
+		const rmb = e.buttons & 0b10;
+		const mmb = e.buttons & 0b100;
+		if (lmb && !buttons.has("lmb")) buttonsJust.add("lmb");
+		if (rmb && !buttons.has("rmb")) buttonsJust.add("rmb");
+		if (mmb && !buttons.has("mmb")) buttonsJust.add("mmb");
+		buttons[lmb ? "add" : "delete"]("lmb");
+		buttons[rmb ? "add" : "delete"]("rmb");
+		buttons[mmb ? "add" : "delete"]("mmb");
 	}
 	window.addEventListener("mousedown", updateMouse);
 	window.addEventListener("mouseup", updateMouse);
@@ -286,7 +289,7 @@
 		this.falling = 0;
 		
 		this.jumpBuffer = 0;
-		this.storedBlocks = 0;
+		this.storedBlock = 0;
 		
 		this.facing = 1;
 		
@@ -350,24 +353,28 @@
 			if (justPressed("spacebar")) {
 				const tx = flr((this.x + w/2) / TILE_SIZE);
 				const ty = ceil((this.y + h/2) / TILE_SIZE);
-				if (this.storedBlocks > 0) {
-					if (!getTile(tx, ty, tile.unbreakable) || pressed("down")) {
-						if (pressed("down") && getTile(tx, ty, tile.unbreakable)) {
+				const blockBoost = DEBUG && pressed("down");
+				if (this.storedBlock > 0) {
+					if (!getTile(tx, ty, tile.unbreakable) || (blockBoost && getTile(tx, ty, tile.unbreakable) != tile.unbreakable)) {
+						if (blockBoost && getTile(tx, ty, tile.unbreakable)) {
 							setTile(tx, ty, tile.none);
 							this.vsp = jumpSpeed * Math.sqrt(2);
 						} else
-							setTile(tx, ty, tile.tile);
-						this.storedBlocks--;
+							setTile(tx, ty, this.storedBlock);
+						this.storedBlock = 0;
 					} else if (!getTile(tx, ty - 1, tile.unbreakable) && !getTile(tx, ty - 2, tile.unbreakable)) {
-						setTile(tx, ty - 1, tile.tile);
-						this.storedBlocks--;
+						setTile(tx, ty - 1, this.storedBlock);
+						this.storedBlock = 0;
 						// snap to the block we just placed
 						this.y = (ty - 1) * TILE_SIZE - h;
 					}
-				} else if (getTile(tx, ty) && this.falling == 0) {
-					setTile(tx, ty, tile.none);
-					this.storedBlocks++;
-					this.falling = 999;
+				} else if (this.falling == 0) {
+					const tl = getTile(tx, ty);
+					if (tl && tl != tile.unbreakable) {
+						this.storedBlock = tl;
+						setTile(tx, ty, tile.none);
+						this.falling = 999;
+					}
 				}
 			}
 			
@@ -388,18 +395,17 @@
 			}
 		};
 		this.draw = function(ctx) {
-			if (this.storedBlocks) {
-				ctx.drawImage(assets.stone, -4, -26, 32, 32);
+			if (this.storedBlock) {
+				ctx.drawImage(tileGraphic(this.storedBlock), -4, -26, 32, 32);
 			}
 			
 			let frame = (this.facing === 1 ? 1 : 2);
-			if (this.storedBlocks) frame += 2;
+			if (this.storedBlock) frame += 2;
 			ctx.drawImage(assets["player" + frame], -4, -8, 32, 32);
 		};
 	}
 	function WinText() {
-		this.isGUI = true;
-		this.draw = function(ctx) {
+		this.drawGUI = function(ctx) {
 			ctx.fillStyle = "white";
 			ctx.textAlign = "center";
 			ctx.textBaseline = "top";
@@ -419,13 +425,12 @@
 	function Timer() {
 		this.time = 0;
 		this.stopped = false;
-		this.isGUI = true;
 		this.player = null;
 		
 		this.step = function(dt) {
 			if (!this.stopped) this.time += dt;
 		};
-		this.draw = function(ctx) {
+		this.drawGUI = function(ctx) {
 			ctx.fillStyle = "white";
 			ctx.textAlign = "center";
 			ctx.textBaseline = "top";
@@ -461,6 +466,9 @@
 		let scrolledY = 0;
 		let lastMouseX = mouseX;
 		let lastMouseY = mouseY;
+		let couldPick = false;
+		
+		let brush = tile.tile;
 		
 		// 2-finger touch scrolling, mainly
 		function onScroll(e) {
@@ -476,7 +484,8 @@
 			const joystickY = pressed("down") - pressed("up");
 			camX += joystickX * dt * moveSpeed + scrolledX;
 			camY += joystickY * dt * moveSpeed + scrolledY;
-			if (mouseX != null && mouseY != null && middleMouseDown) {
+			if (mouseX != null && mouseY != null && pressed("mmb")) {
+				if (lastMouseX - mouseX != 0 || lastMouseY - mouseY != 0) couldPick = false;
 				camX += lastMouseX - mouseX;
 				camY += lastMouseY - mouseY;
 			}
@@ -486,8 +495,13 @@
 			lastMouseX = mouseX;
 			lastMouseY = mouseY;
 			
-			if (mouseDown || rightMouseDown) {
-				const tl = rightMouseDown ? tile.none : tile.tile;
+			if (justPressed("1")) brush--;
+			if (justPressed("2")) brush++;
+			brush = clamp(brush, 1, MAX_TILES);
+			
+			if (pressed("lmb") || pressed("rmb")) {
+				couldPick = false;
+				const tl = pressed("rmb") ? tile.none : brush;
 				const [cx, cy] = getClampedCameraPos();
 				const tx = flr((cx + mouseX) / TILE_SIZE);
 				const ty = flr((cy + mouseY) / TILE_SIZE);
@@ -500,6 +514,16 @@
 					saveLevels();
 					startGame();
 				});
+			}
+		};
+		
+		this.draw = function() {
+			if (!pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
+				const [cx, cy] = getClampedCameraPos();
+				const tx = flr((cx + mouseX) / TILE_SIZE);
+				const ty = flr((cy + mouseY) / TILE_SIZE);
+				ctx.globalAlpha = 0.5;
+				ctx.drawImage(tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE, 32, 32);
 			}
 		};
 		
@@ -523,10 +547,14 @@
 		return [eCamX, eCamY];
 	}
 	
+	function tileGraphic(tile) {
+		return assets["tile" + tile] || assets.errortile;
+	}
+	
 	let camX = 0;
 	let camY = 0;
 	let loading = true;
-	function draw() {
+	function draw(dt) {
 		if (loading) return drawLoadingScreen();
 		ctx.save();
 		ctx.scale(gameScale, gameScale);
@@ -559,7 +587,7 @@
 				if (!tilemap[y]) continue;
 				for (let x = minx; x < maxx; x++) {
 					if (tilemap[y][x])
-						ctx.drawImage(assets.stone, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+						ctx.drawImage(tileGraphic(tilemap[y][x]), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
 				}
 			}
 			
@@ -567,9 +595,13 @@
 				if (obj.draw) {
 					ctx.save();
 					if ("x" in obj) ctx.translate(flrto(+obj.x, gameScaleInverse), flrto(+obj.y, gameScaleInverse))
-					if (obj.isGUI) ctx.translate(eCamX, eCamY);
 					obj.draw(ctx);
 					ctx.restore();
+				}
+			});
+			objs.forEach(function(obj) {
+				if (obj.drawGUI) {
+					obj.drawGUI(ctx);
 				}
 			});
 		} catch(e) {
@@ -581,8 +613,9 @@
 				ctx.textAlign = "left";
 				ctx.textBaseline = "top";
 				ctx.font = "11px sans-serif";
+				const fps = (1 / dt).toFixed(1);
 				ctx.fillText(
-					"DEBUG - mouse: " + mouseX + " " + mouseY,
+					"DEBUG - fps: " + fps,
 					2, 2
 				);
 			}
@@ -594,12 +627,10 @@
 	}
 	
 	let lastT = 0;
-	const fpsCounter = document.getElementById("fps");
 	const maxDelta = 1 / 10;
 	function step(t) {
 		const dt = Math.min((t - lastT) / 1000, maxDelta);
 		lastT = t;
-		if (DEBUG) fpsCounter.textContent = flr(1 / dt);
 		
 		if (paused) {
 			stepPause();
@@ -609,7 +640,7 @@
 			});
 			if (justPressed("enter") || justPressed("esc")) enterPause();
 		}
-		draw();
+		draw(dt);
 		buttonsJust.forEach(function(bt) {
 			buttonsJust.delete(bt);
 		});
@@ -953,21 +984,19 @@
 		};
 	});
 	
-	if (!DEBUG) {
-		window.onresize = resizeGame;
-		gameContainer.style = "display: grid; width: 100%; height: 100%; place-items: center;";
-		document.documentElement.style.margin = "0";
-		document.body.style.margin = "0";
-		//document.body.style.overflow = "none";
-		document.documentElement.style.width = "100%";
-		document.documentElement.style.height = "100%";
-		document.body.style.width = "100%";
-		document.body.style.height = "100%";
-		canv.style.minWidth = "0";
-		canv.style.minHeight = "0";
-		canv.style.maxWidth = "100%";
-		canv.style.maxHeight = "100%";
-	}
+	window.onresize = resizeGame;
+	gameContainer.style = "display: grid; width: 100%; height: 100%; place-items: center;";
+	document.documentElement.style.margin = "0";
+	document.body.style.margin = "0";
+	//document.body.style.overflow = "none";
+	document.documentElement.style.width = "100%";
+	document.documentElement.style.height = "100%";
+	document.body.style.width = "100%";
+	document.body.style.height = "100%";
+	canv.style.minWidth = "0";
+	canv.style.minHeight = "0";
+	canv.style.maxWidth = "100%";
+	canv.style.maxHeight = "100%";
 	resizeGame();
 	draw();
 	
