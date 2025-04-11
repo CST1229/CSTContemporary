@@ -22,6 +22,8 @@
 <script>
 	const DEBUG = true;
 	
+	// TODO: evil moving platform
+	
 	// the game itself
 	
 	// Assets and constants
@@ -32,17 +34,9 @@
 		player3: 0,
 		player4: 0,
 		errortile: 0,
+		tile0: 0,
 	};
-	const tile = {
-		none: 0,
-		tile: 1,
-		unbreakable: 2,
-		gold: 3,
-	};
-	const MAX_TILES = Math.max(...Object.values(tile));
-	for (let i = 1; i <= MAX_TILES; i++) {
-		assets["tile" + i] = 0;
-	}
+	let tiles, tile, tilesIndexed, MAX_TILES;
 	
 	
 	// utility functions
@@ -183,21 +177,23 @@
 	let tilemap;
 	let gameLength = "Medium";
 	function genLevel(type) {
-		if (type === "random")
+		if (type === "random") {
 			tilemap = fill(new Array(tmh)).map(function(v, i) {
 				return fill(new Array(tmw)).map(function() {
 					if (i > 0) return Math.floor(Math.random() * (i + GEN_YOFF) / GEN_FACTOR) ? tile.tile : tile.none;
 					return tile.none;
 				});
 			});
-		else if (type === "flat")
+			tilemap[0][0] = tile.obj_player;
+		} else if (type === "flat") {
 			tilemap = fill(new Array(tmh)).map(function(v, i) {
 				return fill(new Array(tmw)).map(function() {
 					if (i < (tmh - 1)) return tile.none;
 					return tile.tile;
 				});
 			});
-		else
+			tilemap[tmh - 2][1] = tile.obj_player;
+		} else
 			tilemap = fill(new Array(tmh)).map(function(v, i) {
 				return fill(new Array(tmw), tile.none);
 			});
@@ -281,92 +277,225 @@
 		if (index >= 0) objs.splice(index, 1);
 	}
 	
-	function Player(timer) {
-		this.x = 0;
-		this.y = 0;
-		this.hsp = -0.1;
-		this.vsp = 0;
-		this.falling = 0;
+	const collideInclude = {
+		NONE: 0,
+		TILES: 0b1,
+		OBJECTS: 0b10,
+		SOLID_OBJECTS: 0b100,
+		ALL: 0b111,
+		SOLIDS: 0b101,
+	};
+	
+	function checkCollision(x, y, exclude = null, include = collideInclude.NONE) {
+		if ((include & collideInclude.TILES) && tileAt(x, y, tile.unbreakable)) return true;
+		if (include & collideInclude.OBJECTS) {
+			for (const o of objs) {
+				if (exclude === o) continue;
+				if (!o.isHitboxObj) continue;
+				if (!(include & collideInclude.SOLID_OBJECTS) && o.solid) continue;
+				if (!(include & collideInclude.OBJECTS) && !o.solid) continue;
+				if (x >= o.x && y >= o.y && x < (o.x + o.w) && y < (o.y + o.h)) return true;
+			}
+		}
+		return false;
+	}
+	function AABBLineCheck(x, w, ox, ow) {
+		return x < ox+ow && x+w > ox;
+	}
+	function AABBCheck(x, y, w, h, ox, oy, ow, oh) {
+		return AABBLineCheck(x, w, ox, ow) && AABBLineCheck(y, h, oy, oh);
+	}
+	function getHitboxCollisions(x, y, w, h, exclude = null, nonSolids = false) {
+		const collisions = [];
+		for (const o of objs) {
+			if (exclude === o) continue;
+			if (!o.isHitboxObj) continue;
+			if (!nonSolids && !o.solid) continue;
+			if (AABBCheck(x, y, w, h, o.x, o.y, o.w, o.h)) collisions.push(o);
+		}
+		return collisions;
+	}
+	
+	class Obj {
+		// apparently instanceof is slow, so optimize
+		isHitboxObj = false;
+	}
+	class HitboxObj extends Obj {
+		isHitboxObj = true;
 		
-		this.jumpBuffer = 0;
-		this.storedBlock = 0;
+		x = 0;
+		y = 0;
+		w = 0;
+		h = 0;
+		solid = false;
+	}
+	class CollideObj extends HitboxObj {
+		hsp = 0;
+		vsp = 0;
 		
-		this.facing = 1;
+		hitsTiles = true;
+		hitsObjects = true;
 		
-		const grav = 1200;
-		const accel = 800;
-		const decel = 3000;
-		const friction = 800;
-		const jumpSpeed = -500;
-		const maxSpeed = 300;
-		const w = 24;
-		const h = 24;
+		moveY(dt, {onHitFloor = ()=>{}, onHitCeiling = ()=>{}}) {
+			this.y += this.vsp * dt;
+			const oldVsp = this.vsp;
+			if (this.hitsTiles) {
+				if (this.vsp > 0 && (
+					tileAt(this.x, this.y + this.h, tile.unbreakable) ||
+					tileAt(this.x + this.w - 0.01, this.y + this.h, tile.unbreakable)
+				)) {
+					this.y = flrto(this.y + this.h, TILE_SIZE) - this.h;
+					this.vsp = 0;
+					onHitFloor.call(this, oldVsp);
+				} else if (this.vsp < 0 && tileAt(this.x + this.w/2, this.y, tile.unbreakable)) {
+					this.y = flrto(this.y, TILE_SIZE) + TILE_SIZE;
+					this.vsp = 0;
+					onHitCeiling.call(this, oldVsp);
+				}
+			}
+			if (this.hitsObjects && oldVsp != 0) {
+				
+				if (oldVsp > 0) {
+					const colls = getHitboxCollisions(this.x, this.y, this.w, this.h, this, false);
+					for (const obj of colls) {
+						if (obj.y < (this.y + this.h)) {
+							this.y = obj.y - this.h;
+							this.vsp = 0;
+							onHitFloor.call(this, oldVsp);
+						}
+					}
+				} else if (oldVsp < 0) {
+					const colls = getHitboxCollisions(this.x, this.y, this.w, this.h, this, false);
+					for (const obj of colls) {
+						if ((obj.y + obj.h) > this.y) {
+							this.y = obj.y + obj.h;
+							this.vsp = 0;
+							onHitCeiling.call(this, oldVsp);
+						}
+					}
+				}
+			}
+		}
 		
-		if (timer) timer.player = this;
+		moveX(dt, {onHitWall = ()=>{}}) {
+			this.x += this.hsp * dt;
+			const oldHsp = this.hsp;
+			if (this.hitsTiles) {
+				if (this.hsp <= 0 && tileAt(this.x, this.y + this.h/2, tile.unbreakable)) {
+					this.x = flrto(this.x, TILE_SIZE) + TILE_SIZE;
+					this.hsp = 0;
+					onHitWall.call(this, oldHsp, "left");
+				} else if (this.hsp >= 0 && tileAt(this.x + this.w, this.y + this.h/2, tile.unbreakable)) {
+					this.x = flrto(this.x + this.w, TILE_SIZE) - this.w;
+					this.hsp = 0;
+					onHitWall.call(this, oldHsp, "right");
+				}
+			}
+			/*
+			if (this.hitsObjects && oldHsp != 0) {
+				if (oldHsp > 0) {
+					const colls = getHitboxCollisions(this.x, this.y, this.w, this.h, this, false);
+					for (const obj of colls) {
+						if (obj.x < (this.x + this.w)) {
+							this.x = obj.x - this.w;
+							this.hsp = 0;
+							onHitWall.call(this, oldHsp, "right");
+						}
+					}
+				} else if (oldHsp < 0) {
+					const colls = getHitboxCollisions(this.x, this.y, this.w, this.h, this, false);
+					for (const obj of colls) {
+						if ((obj.x + obj.w) > this.x) {
+							this.x = obj.x + obj.w;
+							this.hsp = 0;
+							onHitWall.call(this, oldHsp, "left");
+						}
+					}
+				}
+			}
+			*/
+		}
+		move(dt, callbacks = {}) {
+			this.moveX(dt, callbacks);
+			this.moveY(dt, callbacks);
+		}
+	}
+	class Player extends CollideObj {
+		falling = 0;
 		
-		this.step = function(dt) {
+		solid = true;
+		
+		jumpBuffer = 0;
+		storedBlock = 0;
+		
+		facing = 1;
+		
+		grav = 1200;
+		accel = 800;
+		decel = 3000;
+		friction = 800;
+		jumpSpeed = -500;
+		maxSpeed = 300;
+		
+		w = 24;
+		h = 24;
+		
+		spawnAt(x, y) {
+			this.x = x + (32 - this.w) / 2;
+			this.y = y + TILE_SIZE - this.h;
+		}
+		
+		step(dt) {
 			const joystickX = pressed("right") - pressed("left");
 			
 			if (joystickX !== 0) {
 				if (joystickX === -sign(this.hsp))
-					this.hsp += joystickX * decel * dt;
+					this.hsp += joystickX * this.decel * dt;
 				else
-					this.hsp += joystickX * accel * dt;
+					this.hsp += joystickX * this.accel * dt;
 				this.facing = joystickX;
 			} else
-				this.hsp = approach(this.hsp, 0, friction * dt);
+				this.hsp = approach(this.hsp, 0, this.friction * dt);
 			
-			this.vsp += grav * dt;
-			this.hsp = Math.min(Math.max(this.hsp, -maxSpeed), maxSpeed);
+			this.vsp += this.grav * dt;
+			this.hsp = Math.min(Math.max(this.hsp, -this.maxSpeed), this.maxSpeed);
 			
-			this.y += this.vsp * dt;
 			this.falling += dt;
-			if (this.vsp > 0 && (
-				tileAt(this.x, this.y + h, tile.unbreakable) ||
-				tileAt(this.x + w - 0.01, this.y + h, tile.unbreakable)
-			)) {
-				this.y = flrto(this.y + h, TILE_SIZE) - h;
-				this.vsp = 0;
-				this.falling = 0;
-			} else if (this.vsp < 0 && tileAt(this.x + w/2, this.y, tile.unbreakable)) {
-				this.y = flrto(this.y, TILE_SIZE) + TILE_SIZE;
-				this.vsp = 0;
-			}
-			this.x += this.hsp * dt;
-			if (this.hsp <= 0 && tileAt(this.x, this.y + h/2, tile.unbreakable)) {
-				this.x = flrto(this.x, TILE_SIZE) + TILE_SIZE;
-				this.hsp = 0;
-			} else if (this.hsp >= 0 && tileAt(this.x + w, this.y + h/2, tile.unbreakable)) {
-				this.x = flrto(this.x + w, TILE_SIZE) - w;
-				this.hsp = 0;
-			}
+			this.move(dt, {
+				onHitFloor() {
+					this.falling = 0;
+				},
+			});
 			
 			if (justPressed("up")) this.jumpBuffer = 0.1;
 			if (this.falling <= 0.2 && this.jumpBuffer > 0) {
 				this.falling = 999;
 				this.jumpBuffer = 0;
-				this.vsp = jumpSpeed;
+				this.vsp = this.jumpSpeed;
 			}
 			this.jumpBuffer = approach(this.jumpBuffer, 0, dt);
 			
 			
 			if (justPressed("spacebar")) {
-				const tx = flr((this.x + w/2) / TILE_SIZE);
-				const ty = ceil((this.y + h/2) / TILE_SIZE);
+				const collX = this.x + this.w/2;
+				const collY = this.y + this.h/2;
+				const tx = flr(collX / TILE_SIZE);
+				const ty = ceil(collY / TILE_SIZE);
 				const blockBoost = DEBUG && pressed("down");
 				if (this.storedBlock > 0) {
-					if (!getTile(tx, ty, tile.unbreakable) || (blockBoost && getTile(tx, ty, tile.unbreakable) != tile.unbreakable)) {
+					const collisionBelow = checkCollision(collX, collY + TILE_SIZE, this, collideInclude.SOLIDS);
+					if (!collisionBelow || (blockBoost && getTile(tx, ty, tile.unbreakable) != tile.unbreakable)) {
 						if (blockBoost && getTile(tx, ty, tile.unbreakable)) {
 							setTile(tx, ty, tile.none);
-							this.vsp = jumpSpeed * Math.sqrt(2);
+							this.vsp = this.jumpSpeed * Math.sqrt(2);
 						} else
 							setTile(tx, ty, this.storedBlock);
 						this.storedBlock = 0;
-					} else if (!getTile(tx, ty - 1, tile.unbreakable) && !getTile(tx, ty - 2, tile.unbreakable)) {
+					} else if (!checkCollision(collX, collY, this, collideInclude.SOLIDS) && !checkCollision(collX, collY-TILE_SIZE, this, collideInclude.SOLIDS)) {
 						setTile(tx, ty - 1, this.storedBlock);
 						this.storedBlock = 0;
 						// snap to the block we just placed
-						this.y = (ty - 1) * TILE_SIZE - h;
+						this.y = (ty - 1) * TILE_SIZE - this.h;
 					}
 				} else if (this.falling == 0) {
 					const tl = getTile(tx, ty);
@@ -378,23 +507,15 @@
 				}
 			}
 			
-			camX = this.x + w/2 - sw/2;
-			camY = this.y + h/2 - sh/2;
+			camX = this.x + this.w/2 - sw/2;
+			camY = this.y + this.h/2 - sh/2;
 			
-			if (this.y >= (tmh * TILE_SIZE - h)) {
+			if (this.y >= (tmh * TILE_SIZE - this.h)) {
 				deleteObj(this);
-				if (timer) timer.stopped = true;
 				objs.push(new WinText());
 			}
-			if (justPressed("0")) {
-				queueMicrotask(() => {
-					editor = true;
-					loadLevel(level);
-					startGame();
-				});
-			}
-		};
-		this.draw = function(ctx) {
+		}
+		draw(ctx) {
 			if (this.storedBlock) {
 				ctx.drawImage(tileGraphic(this.storedBlock), -4, -26, 32, 32);
 			}
@@ -402,7 +523,7 @@
 			let frame = (this.facing === 1 ? 1 : 2);
 			if (this.storedBlock) frame += 2;
 			ctx.drawImage(assets["player" + frame], -4, -8, 32, 32);
-		};
+		}
 	}
 	function WinText() {
 		this.drawGUI = function(ctx) {
@@ -422,42 +543,14 @@
 			);
 		};
 	}
-	function Timer() {
-		this.time = 0;
-		this.stopped = false;
-		this.player = null;
-		
-		this.step = function(dt) {
-			if (!this.stopped) this.time += dt;
-		};
-		this.drawGUI = function(ctx) {
-			ctx.fillStyle = "white";
-			ctx.textAlign = "center";
-			ctx.textBaseline = "top";
-			ctx.font = "32px sans-serif";
-			
-			ctx.fillText(
-				this.time.toFixed(3).toString(),
-				sw/2, 16
-			);
-			
-			if (this.player) {
-				const PROGRESS_WIDTH = 12;
-				if (!this.stopped) {
-					ctx.globalAlpha = this.player.x > 16 ? 1 : 0.25;
-					
-					// split in 2 for proper transparency
-					const playerY = flrto(this.player.y / (tmh * TILE_SIZE) * sh, gameScaleInverse);
-					ctx.fillStyle = "black"
-					ctx.fillRect(0, 0, PROGRESS_WIDTH, playerY);
-					ctx.fillRect(0, playerY + PROGRESS_WIDTH, PROGRESS_WIDTH, sh - playerY);
-					
-					ctx.fillStyle = "#639bff";
-					ctx.fillRect(0, playerY, PROGRESS_WIDTH, PROGRESS_WIDTH);
-				} else {
-					ctx.fillStyle = "black";
-					ctx.fillRect(0, 0, PROGRESS_WIDTH, sh);
-				}
+	function Playtest() {
+		this.step = function() {
+			if (justPressed("0")) {
+				queueMicrotask(() => {
+					editor = true;
+					loadLevel(level);
+					startGame();
+				});
 			}
 		};
 	}
@@ -473,6 +566,7 @@
 		// 2-finger touch scrolling, mainly
 		function onScroll(e) {
 			if (paused) return;
+			e.preventDefault();
 			scrolledX += e.deltaX / gameScale;
 			scrolledY += e.deltaY / gameScale;
 		}
@@ -484,6 +578,7 @@
 			const joystickY = pressed("down") - pressed("up");
 			camX += joystickX * dt * moveSpeed + scrolledX;
 			camY += joystickY * dt * moveSpeed + scrolledY;
+			if (justPressed("mmb")) couldPick = true;
 			if (mouseX != null && mouseY != null && pressed("mmb")) {
 				if (lastMouseX - mouseX != 0 || lastMouseY - mouseY != 0) couldPick = false;
 				camX += lastMouseX - mouseX;
@@ -497,28 +592,36 @@
 			
 			if (justPressed("1")) brush--;
 			if (justPressed("2")) brush++;
-			brush = clamp(brush, 1, MAX_TILES);
+			brush = clamp(brush, 0, MAX_TILES);
 			
-			if (pressed("lmb") || pressed("rmb")) {
-				couldPick = false;
-				const tl = pressed("rmb") ? tile.none : brush;
-				const [cx, cy] = getClampedCameraPos();
-				const tx = flr((cx + mouseX) / TILE_SIZE);
-				const ty = flr((cy + mouseY) / TILE_SIZE);
-				setTile(tx, ty, tl);
+			if (mouseX != null) {
+				if (pressed("lmb") || pressed("rmb")) {
+					couldPick = false;
+					const tl = pressed("rmb") ? tile.none : brush;
+					const [cx, cy] = getClampedCameraPos();
+					const tx = flr((cx + mouseX) / TILE_SIZE);
+					const ty = flr((cy + mouseY) / TILE_SIZE);
+					setTile(tx, ty, tl);
+				} else if (!pressed("mmb") && couldPick) {
+					couldPick = false;
+					const [cx, cy] = getClampedCameraPos();
+					const tx = flr((cx + mouseX) / TILE_SIZE);
+					const ty = flr((cy + mouseY) / TILE_SIZE);
+					brush = getTile(tx, ty, brush);
+				}
 			}
 			
 			if (justPressed("0")) {
 				queueMicrotask(() => {
 					editor = false;
 					saveLevels();
-					startGame();
+					startGame(true);
 				});
 			}
 		};
 		
 		this.draw = function() {
-			if (!pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
+			if (mouseX != null && !pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
 				const [cx, cy] = getClampedCameraPos();
 				const tx = flr((cx + mouseX) / TILE_SIZE);
 				const ty = flr((cy + mouseY) / TILE_SIZE);
@@ -549,6 +652,21 @@
 	
 	function tileGraphic(tile) {
 		return assets["tile" + tile] || assets.errortile;
+	}
+	
+	// actual tile loading since classes aren't hoisted
+	tiles = {
+		none: {name: "Air"},
+		tile: {name: "Stone Block"},
+		unbreakable: {name: "Cobalt Block"},
+		gold: {name: "Gold Block"},
+		obj_player: {name: "Player Start", object: Player},
+	};
+	tile = Object.fromEntries(Object.entries(tiles).map(([key], i) => [key, i]));
+	tilesIndexed = Object.fromEntries(Object.entries(tiles).map(([key, value], i) => [i, value]));
+	MAX_TILES = Math.max(...Object.values(tile));
+	for (let i = 1; i <= MAX_TILES; i++) {
+		assets["tile" + i] = 0;
 	}
 	
 	let camX = 0;
@@ -594,20 +712,22 @@
 			objs.forEach(function(obj) {
 				if (obj.draw) {
 					ctx.save();
-					if ("x" in obj) ctx.translate(flrto(+obj.x, gameScaleInverse), flrto(+obj.y, gameScaleInverse))
+					if ("x" in obj) ctx.translate(+obj.x, +obj.y)
 					obj.draw(ctx);
 					ctx.restore();
-				}
-			});
-			objs.forEach(function(obj) {
-				if (obj.drawGUI) {
-					obj.drawGUI(ctx);
 				}
 			});
 		} catch(e) {
 			throw e;
 		} finally {
 			ctx.restore();
+			objs.forEach(function(obj) {
+				if (obj.drawGUI) {
+					ctx.save();
+					obj.drawGUI(ctx);
+					ctx.restore();
+				}
+			});
 			if (DEBUG) {
 				ctx.fillStyle = "white";
 				ctx.textAlign = "left";
@@ -680,7 +800,7 @@
 			return true;
 		}],
 		levels: [() => onTitle ? "Level Editor..." : "Levels...", () => {
-			saveLevels();
+			if (editor) saveLevels();
 			return pauseSubmenu(Menu.levels);
 		}],
 		stoneSimulator: ["Stone Simulator...", () => pauseSubmenu([MenuOption.back, MenuOption.gameLength])],
@@ -689,8 +809,14 @@
 	Menu.title = {inescapable: true, items: [
 		/*["Start", () => {
 			editor = false;
-			startGame(true);
+			startGame();
 		}],*/
+		["Start First Level", () => {
+			if (!levels[0]) return true;
+			editor = false;
+			loadLevel(levels[0]);
+			startGame();
+		}],
 		MenuOption.levels,
 		//MenuOption.stoneSimulator,
 		["Links...",
@@ -723,16 +849,16 @@
 	Menu.pause = [
 		["Continue"],
 		/*["New Game", () => {
-			startGame(true);
+			startGame();
 		}],*/
 		["Edit (0)", () => {
 			editor = true;
+			loadLevel(level);
 			startGame();
 		}],
 		MenuOption.levels,
 		//MenuOption.stoneSimulator,
 		["Exit", () => {
-			saveLevels();
 			titleScreen();
 			return true;
 		}],
@@ -742,7 +868,7 @@
 		["Playtest (0)", () => {
 			editor = false;
 			saveLevels();
-			startGame();
+			startGame(true);
 		}],
 		["Level Properties...", () => pauseSubmenu([
 				MenuOption.back,
@@ -793,6 +919,7 @@
 		],
 		MenuOption.levels,
 		["Exit", () => {
+			saveLevels();
 			titleScreen();
 			return "back";
 		}],
@@ -901,9 +1028,10 @@
 		tmh = 1;
 		genLevel();
 		
+		exitPause();
 		pauseSubmenu(Menu.title);
 	}
-	function startGame(stoneSim = false) {
+	function startGame(playtest = false) {
 		onTitle = false;
 		deleteAllObjs();
 		camX = 0;
@@ -912,15 +1040,23 @@
 		if (editor) {
 			objs.push(new Editor());
 		} else {
-			let timer;
-			if (stoneSim) {
-				timer = new Timer();
-				tmw = 50;
-				tmh = lengthHeights[gameLength];
-				genLevel("random");
+			if (playtest) {
+				objs.push(new Playtest());
+				// stone sim stuff
+				//tmw = 50;
+				//tmh = lengthHeights[gameLength];
+				//genLevel("random");
 			}
-			objs.push(new Player(timer));
-			if (timer) objs.push(timer);
+			
+			for (let y = 0; y < tmh; y++) for (let x = 0; x < tmw; x++) {
+				const tl = tilemap[y][x];
+				if (tl && tilesIndexed[tl] && tilesIndexed[tl].object) {
+					tilemap[y][x] = 0;
+					const obj = new tilesIndexed[tl].object();
+					if (obj.spawnAt) obj.spawnAt(x * TILE_SIZE, y * TILE_SIZE);
+					objs.push(obj);
+				}
+			}
 		}
 	}
 	
