@@ -21,9 +21,7 @@
 
 <script>
 	const DEBUG = true;
-	
-	// TODO: evil moving platform
-	
+		
 	// the game itself
 	
 	// Assets and constants
@@ -35,6 +33,7 @@
 		player4: 0,
 		errortile: 0,
 		tile0: 0,
+		peterplatform: 0,
 	};
 	let tiles, tile, tilesIndexed, MAX_TILES;
 	
@@ -50,6 +49,12 @@
 	};
 	const sign = function(val) {
 		return val > 0 ? 1 : (val < 0 ? -1 : 0);
+	};
+	const oscillate = function(from, to, period, timer) {
+		return from + (-Math.cos(timer * Math.PI / period) + 1) / 2 * (to - from);
+	};
+	const oscillateFromCenter = function(from, to, period, timer) {
+		return from + (Math.sin(timer * Math.PI / period) + 1) / 2 * (to - from);
 	};
 	const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 	const ceil = Math.ceil;
@@ -525,6 +530,38 @@
 			ctx.drawImage(assets["player" + frame], -4, -8, 32, 32);
 		}
 	}
+	class PeterPlatform extends CollideObj {
+		solid = true;
+		hitsTiles = true;
+		hitsObjects = true;
+		
+		startX = 0;
+		startY = 0;
+		timer = 0;
+		
+		w = 32 * 3;
+		h = 32;
+		
+		moveX = 0;
+		moveY = 32 * -5;
+		moveTime = 3;
+		
+		spawnAt(x, y) {
+			this.x = x;
+			this.y = y;
+			this.startX = this.x;
+			this.startY = this.y;
+		}
+		
+		step(dt) {
+			this.timer += dt;
+			this.y = oscillate(this.startY, this.startY + this.moveY, this.moveTime, this.timer);
+		}
+		draw(ctx) {
+			ctx.drawImage(assets.peterplatform, 0, 0, this.w, this.h);
+		}
+	}
+	
 	function WinText() {
 		this.drawGUI = function(ctx) {
 			ctx.fillStyle = "white";
@@ -661,6 +698,7 @@
 		unbreakable: {name: "Cobalt Block"},
 		gold: {name: "Gold Block"},
 		obj_player: {name: "Player Start", object: Player},
+		obj_peterplatform: {name: "Peter Platform", object: PeterPlatform},
 	};
 	tile = Object.fromEntries(Object.entries(tiles).map(([key], i) => [key, i]));
 	tilesIndexed = Object.fromEntries(Object.entries(tiles).map(([key, value], i) => [i, value]));
