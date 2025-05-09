@@ -280,13 +280,16 @@
 	
 	// Level storage
 	let levels = [];
-	levels.push({name: "Test Level",
-		tilemap: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,1,1]]
-	});
 	try {
 		const levArr = JSON.parse(localStorage.getItem("levels"));
 		if (Array.isArray(levArr)) levels = levArr;
 	} catch(e) {}
+	
+	if (!localStorage.getItem("levels")) {
+		fetch("./assets/levels.json").then((res) => res.json()).then((arr) => {
+			levels.push(...arr);
+		});
+	}
 	
 	function saveLevels() {
 		saveLevel();
@@ -921,29 +924,44 @@
 		}],
 		MenuOption.levels,
 		//MenuOption.stoneSimulator,
-		["Links...",
+		["Options...",
 			() => pauseSubmenu([
 				MenuOption.back,
+				["Download All Levels", () => {
+					const url = URL.createObjectURL(new Blob([localStorage.getItem("levels")]));
+					const a = document.createElement("a");
+					a.href = url;
+					a.download = "levels.json";
+					a.click();
+					setTimeout(1000, () => URL.revokeObjectURL(url));
+					return true;
+				}],
 				["Made by CST1229", () => {
 					setTimeout(() => {
-						window.open("https://cst1229.eu.org/", "_blank");
+						window.open("https://cst1229.eu.org/", "_blank", "noopener,noreferrer");
 					}, 100);
 					return true;
 				}],
 				["Source Code", () => {
 					setTimeout(() => {
-						window.open("https://github.com/CST1229/StoneSimulator/", "_blank");
+						window.open("https://github.com/CST1229/CSTContemporary/", "_blank", "noopener,noreferrer");
 					}, 100);
 					return true;
 				}],
 				["Play CST Stone Simulator!", () => {
 					setTimeout(() => {
-						window.open("https://cst1229.github.io/StoneSimulator", "_blank");
+						window.open("https://cst1229.github.io/StoneSimulator", "_blank", "noopener,noreferrer");
 					}, 100);
 					return true;
 				}],
 			]),
 		],
+		["What am I doing???", () => {
+			setTimeout(() => {
+				window.open("https://github.com/CST1229/CSTContemporary/commits", "_blank", "noopener,noreferrer");
+			}, 100);
+			return true;
+		}],
 		["Quit", () => {
 			window.close();
 		}],
@@ -1097,10 +1115,15 @@
 		const menu = pauseMenus[pauseMenus.length - 1];
 		
 		if (onTitle) {
-			ctx.font = "bold 48px sans-serif";
+			ctx.font = "bold 42px sans-serif";
 			ctx.fillText(
-				"CST Contemporary",
+				"CST Contemporary:",
 				cx, cy, sw
+			);
+			ctx.font = "16px sans-serif";
+			ctx.fillText(
+				"Not Really a Game, Just His Random Engine Experiments",
+				cx + 140, cy + 43, sw
 			);
 			cy += 64;
 		}
