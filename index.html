@@ -23,11 +23,16 @@
 	// TODO: fix spritesheets
 	
 	const DEBUG = true;
+	let timeScale = 1;
 		
 	// the game itself
 	
 	// Assets and constants
 	// (filled in by the loader)
+	
+	/**
+	 * Representation of a sprite, with support for pulling out from spritesheets.
+	 */
 	class SpriteDef {
 		image = null;
 		imageX = 0;
@@ -40,26 +45,92 @@
 		originX = 0;
 		originY = 0;
 		
-		constructor(image, ogx = 0, ogy = 0, iw = 0, ih = 0) {
+		constructor(image, ogx = 0, ogy = 0, w = 0, h = 0) {
 			this.image = image;
-			this.imageWidth = image.width;
-			this.imageHeight = image.height;
-			this.width = iw || image.width;
-			this.height = ih || image.height;
+			this.imageWidth = image.naturalWidth;
+			this.imageHeight = image.naturalHeight;
+			this.width = w || image.naturalWidth;
+			this.height = h || image.naturalHeight;
 			this.originX = ogx || 0;
 			this.originY = ogy || 0;
 		}
 	}
 	
+	/**
+	 * Representation of an Aseprite tag.
+	 */
+	class SpriteSheetTagDef {
+		/**
+		 * The name of this tag.
+		 * Empty tags represent all frames in the sprite.
+		 */
+		name = "";
+		frames = [];
+		repeat = Infinity;
+		
+		get length() {
+			return this.frames.length;
+		}
+		set length(val) {
+			this.frames.length = val;
+		}
+		
+		constructor(name, repeat) {
+			this.name = name;
+			if (isNaN(repeat)) {
+				this.repeat = Infinity;
+			} else {
+				this.repeat = Number(repeat);
+			}
+		}
+		
+		addFrame(asset) {
+			this.frames.push(asset);
+		}
+		getFrame(frameNo) {
+			if (this.length === 0) throw new Error(`Tag ${name} has 0 length`);
+			return this.frames[frameNo];
+		}
+		/**
+		 * Get a frame from this tag, accounting for looping, etc..
+		 */
+		getFrameRepeat(frameNo) {
+			if (this.length === 0) throw new Error(`Tag ${name} has 0 length`);
+			frameNo = Math.floor(+frameNo);
+			if (frameNo < 0) return this.getFrameRepeat(0 - frameNo);
+			let repeatNo = frameNo / this.length;
+			// Repeating has ended, so just return the last frame
+			if (repeatNo >= this.repeat) return this.frames[this.length - 1];
+			return this.frames[frameNo % this.length];
+		}
+	}
+	/**
+	 * Representation of an Aseprite-based animation.
+	 */
+	class SpriteSheetDef {
+		name = "";
+		tags = Object.create(null);
+		
+		defineTag(name, repeat = Infinity) {
+			this.tags[name] = new SpriteSheetTagDef(name, repeat);
+		}
+		checkTag(name) {
+			if (!this.tags[name]) throw new Error(`Tag ${name} does not exist in ${this.name}`);
+			return this.tags[name];
+		}
+		getTag(name) {
+			return this.tags[name];
+		}
+		hasTag(name) {
+			return !!this.tags[name];
+		}
+	}
+	
 	const assets = {
-		player1: [4, 8],
-		player2: [4, 8],
-		player3: [4, 8],
-		player4: [4, 8],
+		player: {sheet: "sheets/player"},
 		errortile: 0,
 		tile0: 0,
 		peterplatform: 0,
-		player_sheet: {sheet: "sheets/player"},
 	};
 	let tiles, tile, tilesIndexed, MAX_TILES;
 	
@@ -67,14 +138,29 @@
 		if (typeof img === "string" && assets[img]) img = assets[img];
 		return img;
 	}
-	function drawSprite(ctx, img, x, y, scaleX, scaleY) {
+	function drawSprite(ctx, img, x, y, scaleX = 1, scaleY = 1, rotate = 0) {
 		ensureType(ctx, "ctx", CanvasRenderingContext2D);
-		let spr = getSprite(img);
+		const spr = getSprite(img);
 		if (!spr.image) throw new Error(`Sprite ${spr} not found`);
+		
+		// image x/y/w/h
+		const ix = spr.imageX;
+		const iy = spr.imageY;
+		const iw = spr.imageWidth;
+		const ih = spr.imageHeight;
+		// target x/y/w/h
+		const tx = x - spr.originX;
+		const ty = y - spr.originY;
+		const tw = spr.imageWidth;
+		const th = spr.imageHeight;
+		
+		ctx.save();
+		ctx.scale(scaleX, scaleY);
+		ctx.rotate(rotate);
 		ctx.drawImage(
-			spr.image, spr.imageX, spr.imageY, spr.imageWidth, spr.imageHeight,
-			x - spr.originX, y - spr.originY, img.imageWidth * scaleX, img.imageHeight * scaleY
+			spr.image, ix, iy, iw, ih, tx, ty, tw, th
 		);
+		ctx.restore();
 	}
 	
 	
@@ -487,14 +573,14 @@
 		}
 	}
 	class Player extends CollideObj {
+		facing = 1;
 		falling = 0;
-		
-		solid = true;
-		
 		jumpBuffer = 0;
 		storedBlock = 0;
 		
-		facing = 1;
+		w = 24;
+		h = 24;
+		solid = true;
 		
 		grav = 1200;
 		accel = 800;
@@ -502,9 +588,11 @@
 		friction = 800;
 		jumpSpeed = -500;
 		maxSpeed = 300;
+		coyoteTime = 0.2;
 		
-		w = 24;
-		h = 24;
+		sprite = assets.player;
+		animation = "stand";
+		frame = 0;
 		
 		spawnAt(x, y) {
 			this.x = x + (32 - this.w) / 2;
@@ -534,7 +622,7 @@
 			});
 			
 			if (justPressed("up")) this.jumpBuffer = 0.1;
-			if (this.falling <= 0.2 && this.jumpBuffer > 0) {
+			if (this.falling <= this.coyoteTime && this.jumpBuffer > 0) {
 				this.falling = 999;
 				this.jumpBuffer = 0;
 				this.vsp = this.jumpSpeed;
@@ -580,18 +668,45 @@
 				deleteObj(this);
 				objs.push(new WinText());
 			}
+			
+			this.doAnimation(dt);
 		}
-		draw(ctx) {
-			if (this.storedBlock) {
-				drawSprite(ctx, tileGraphic(this.storedBlock), -4, -26, 1, 1);
+		
+		doAnimation(dt) {
+			let anim = this.animation;
+			let animFPS = 0;
+			if (this.falling <= this.coyoteTime) {
+				if (Math.abs(this.hsp) <= 10) {
+					anim = "stand";
+					animFPS = 1000 / 200;
+				} else {
+					anim = "walk";
+					animFPS = 1000 / 80;
+				}
+			} else {
+				animFPS = 1000 / 100;
+				if (this.vsp >= 0) {
+					anim = "fall";
+				} else {
+					anim = "jump";
+				}
 			}
 			
-			let frame = (this.facing === 1 ? 1 : 2);
-			if (this.storedBlock) frame += 2;
+			if (anim !== this.animation) {
+				this.animation = anim;
+				this.frame = 0;
+			} else {
+				this.frame += dt * animFPS;
+			}
+		}
+		
+		draw(ctx) {
+			if (this.storedBlock) {
+				drawSprite(ctx, tileGraphic(this.storedBlock), -4, -26);
+			}
 			
 			let suffix = "_" + (this.facing === 1 ? "r" : "l") + (this.storedBlock ? "c" : "");
-			let playerSprite = "player_stand" + suffix + "0";
-			drawSprite(ctx, playerSprite, 0, 0, 1, 1);
+			drawSprite(ctx, this.sprite.getTag(this.animation + suffix).getFrameRepeat(this.frame), 0, 0);
 		}
 	}
 	class PeterPlatform extends CollideObj {
@@ -622,7 +737,7 @@
 			this.y = oscillate(this.startY, this.startY + this.moveY, this.moveTime, this.timer);
 		}
 		draw(ctx) {
-			drawSprite(ctx, assets.peterplatform, 0, 0, 1, 1);
+			drawSprite(ctx, assets.peterplatform, 0, 0);
 		}
 	}
 	
@@ -727,7 +842,7 @@
 				const tx = flr((cx + mouseX) / TILE_SIZE);
 				const ty = flr((cy + mouseY) / TILE_SIZE);
 				ctx.globalAlpha = 0.5;
-				drawSprite(ctx, tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE, 1, 1);
+				drawSprite(ctx, tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE);
 			}
 		};
 		
@@ -807,7 +922,7 @@
 				if (!tilemap[y]) continue;
 				for (let x = minx; x < maxx; x++) {
 					if (tilemap[y][x])
-						drawSprite(ctx, tileGraphic(tilemap[y][x]), x * TILE_SIZE, y * TILE_SIZE, 1, 1)
+						drawSprite(ctx, tileGraphic(tilemap[y][x]), x * TILE_SIZE, y * TILE_SIZE)
 				}
 			}
 			
@@ -851,7 +966,7 @@
 	let lastT = 0;
 	const maxDelta = 1 / 10;
 	function step(t) {
-		const dt = Math.min((t - lastT) / 1000, maxDelta);
+		const dt = Math.min((t - lastT) / 1000, maxDelta) * timeScale;
 		lastT = t;
 		
 		if (paused) {
@@ -1298,9 +1413,9 @@
 	}
 	
 	const baseDir = "./assets/";
-	Object.keys(assets).forEach(async function(key) {
+	Object.keys(assets).forEach(async function(assetName) {
 		allAssets++;
-		const val = assets[key];
+		const val = assets[assetName];
 		
 		let thisLoaded = false;
 		function loadedAsset() {
@@ -1319,16 +1434,16 @@
 			if (thisLoaded) return;
 			thisLoaded = true;
 			loadedAssets++;
-			console.error("Could not load " + filename + ": ", e);
+			console.error("Could not load " + assetName + ": ", e);
 			loadErrors.push(
-				"Could not load " + filename + "."
+				"Could not load " + assetName + "."
 			);
 			draw();
 		}
 		
 		if (typeof val === "object" && val.sheet) {
 			// Load a spritesheeet
-			delete assets[val];
+			delete assets[assetName];
 			const sheetJson = baseDir + val.sheet + ".json";
 			const sheetPng = baseDir + val.sheet + ".png";
 			
@@ -1338,35 +1453,59 @@
 					throw res.status + " " + res.statusText;
 				}),
 				imgPromise(sheetPng),
-			]).then(([json, sheet]) => {
+			]).then(([json, sheetImage]) => {
+				const sheetDef = new SpriteSheetDef();
+				sheetDef.name = assetName;
+				assets[assetName] = sheetDef;
+				
 				let ogx = 0;
 				let ogy = 0;
-				if (sheet.meta && sheet.meta.slices) {
-					for (const slice of sheet.meta.slices) {
+				if (json.meta && json.meta.slices) {
+					for (const slice of json.meta.slices) {
 						if (slice.name !== "origin") continue;
 						if (!slice.keys[0]) continue;
 						ogx = slice.keys[0].bounds.x;
 						ogy = slice.keys[0].bounds.y;
 					}
 				}
-				for (const [name, frame] of Object.entries(json.frames)) {
-					if (frame.rotated) throw new Error("we need to handle rotated frames because of: " + name);
-					const def = new SpriteDef(sheet, ogx - frame.spriteSourceSize.x, ogy - frame.spriteSourceSize.y);
+				
+				const tags = (json.meta && json.meta.frameTags) || [];
+				sheetDef.defineTag("");
+				for (const tag of tags) {
+					if (tag.direction !== "forward") throw new Error(`Tag directions other than forward are not supported yet (direction ${tag.direction} for ${tag.name})`);
+					sheetDef.defineTag(tag.name, tag.repeat);
+				}
+				
+				let i = 0;
+				for (const [frameName, frame] of Object.entries(json.frames)) {
+					if (frame.rotated) throw new Error("we need to handle rotated frames because of: " + frameName);
+					const def = new SpriteDef(
+						sheetImage, ogx - frame.spriteSourceSize.x, ogy - frame.spriteSourceSize.y,
+						frame.sourceSize.w, frame.sourceSize.h
+					);
 					def.imageX = frame.frame.x;
 					def.imageY = frame.frame.y;
-					def.width = frame.sourceSize.w;
-					def.height = frame.sourceSize.h;
-					assets[name] = def;
+					def.imageWidth = frame.spriteSourceSize.w;
+					def.imageHeight = frame.spriteSourceSize.h;
+					assets[frameName] = def;
+					
+					sheetDef.checkTag("").addFrame(frameName);
+					for (const tag of tags) {
+						if (tag.from <= i && i <= tag.to) {
+							sheetDef.checkTag(tag.name).addFrame(frameName);
+						}
+					}
+					i++;
 				}
 				loadedAsset();
 			}).catch(loadFailed);
 		} else {
-			const filename = baseDir + key + ".png";
+			const filename = baseDir + assetName + ".png";
 			const img = new Image();
 			img.src = filename;
 			img.onload = function() {
 				const args = Array.isArray(val) ? val : [];
-				assets[key] = new SpriteDef(img, ...args);
+				assets[assetName] = new SpriteDef(img, ...args);
 				loadedAsset();
 			};
 			img.onerror = function(e) {
