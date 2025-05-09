@@ -20,8 +20,6 @@
 </center>
 
 <script>
-	// TODO: fix spritesheets
-	
 	const DEBUG = true;
 	let timeScale = 1;
 		
@@ -837,6 +835,7 @@
 		};
 		
 		this.draw = function() {
+			if (paused) return;
 			if (mouseX != null && !pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
 				const [cx, cy] = getClampedCameraPos();
 				const tx = flr((cx + mouseX) / TILE_SIZE);
@@ -945,20 +944,20 @@
 					ctx.restore();
 				}
 			});
-			if (DEBUG) {
-				ctx.fillStyle = "white";
-				ctx.textAlign = "left";
-				ctx.textBaseline = "top";
-				ctx.font = "11px sans-serif";
-				const fps = (1 / dt).toFixed(1);
-				ctx.fillText(
-					"DEBUG - fps: " + fps,
-					2, 2
-				);
-			}
 		}
 		if (paused) {
 			drawPause();
+		}
+		if (DEBUG) {
+			ctx.fillStyle = "white";
+			ctx.textAlign = "left";
+			ctx.textBaseline = "top";
+			ctx.font = "11px sans-serif";
+			const fps = (1 / dt).toFixed(1);
+			ctx.fillText(
+				"DEBUG - fps: " + fps,
+				2, 2
+			);
 		}
 		ctx.restore();
 	}
@@ -989,8 +988,23 @@
 	let paused = false;
 	let pauseMenus = [];
 	function Menu(menu = []) {
+		/**
+		 * The index of the currently selected item in the menu.
+		 */
 		this.index = 0;
+		/**
+		 * If true, this menu can't be escaped with Esc (normally selects the bottommost item).
+		 */
 		this.inescapable = false;
+		/**
+		 * All items of this menu.
+		 */
+		this.items = [];
+		/**
+		 * The original object used to define this menu (can be either a function or array).
+		 */
+		this.definition = null;
+		
 		if (menu.items) {
 			// this is a menu object
 			Object.assign(this, menu);
@@ -1002,11 +1016,14 @@
 		if (!paused) pauseMenus.length = 0;
 		paused = true;
 		
+		const oldItems = items;
+		
 		if (items instanceof Function) items = items();
 		for (let i = 0; i < items.length; i++) {
 			if (items[i].length < 3) items[i][2] = {};
 		}
 		const menu = new Menu(items);
+		menu.definition = oldItems;
 		pauseMenus.push(menu);
 		return menu;
 	}
@@ -1282,6 +1299,27 @@
 				"Ctrl+Up/Down to sort.",
 				8, sh-8, sw-16
 			);
+		} else if (menu.definition === Menu.pauseEditor) {
+			const text = `Arrow keys/middle click drag/scroll: Move around
+Left click: Place objects
+Right click: Move objects
+Middle click tap: Pick objects
+1/2: Cycle objects
+0: Playtest`;
+			const fontSize = 16;
+			ctx.font = fontSize + "px sans-serif";
+			ctx.fillStyle = "white";
+			ctx.textAlign = "left";
+			ctx.textBaseline = "bottom";
+			
+			const split = text.split("\n");
+			const yOrigin = sh - 8 - ((split.length - 1) * fontSize);
+			for (let i = 0; i < split.length; i++) {
+				ctx.fillText(
+					split[i],
+					8, yOrigin + i * fontSize, sw-16
+				);
+			}
 		}
 	}
 	function stepPause() {
