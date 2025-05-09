@@ -1,5 +1,7 @@
-# CST Stone Simulator
+# CST Contemporary
 
-A small web game I made. Consider this a sort of "break" from larger projects. I mostly made this on my mostly-used-for-writing-during-class laptop during school, aside from some later development which I did on my main PC at home.
+CST's random engine testing playground based on CST Stone Simulator, with a random name, that I mostly work on with my mostly-used-for-writing laptop during school.
 
-This was also originally intended to run as a HTA, which is why it uses mostly only stuff in IE11.
+## Development
+
+Unlike Stone Simulator, this fetches non-image files so CORS is required (if you have node.js installed with the http-server package globally also installed, you can use the included server.bat file).
