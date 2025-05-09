@@ -20,22 +20,63 @@
 </center>
 
 <script>
+	// TODO: fix spritesheets
+	
 	const DEBUG = true;
 		
 	// the game itself
 	
 	// Assets and constants
-	// assets are filled in with Images by the loader
+	// (filled in by the loader)
+	class SpriteDef {
+		image = null;
+		imageX = 0;
+		imageY = 0;
+		imageWidth = 0;
+		imageHeight = 0;
+		width = 0;
+		height = 0;
+		
+		originX = 0;
+		originY = 0;
+		
+		constructor(image, ogx = 0, ogy = 0, iw = 0, ih = 0) {
+			this.image = image;
+			this.imageWidth = image.width;
+			this.imageHeight = image.height;
+			this.width = iw || image.width;
+			this.height = ih || image.height;
+			this.originX = ogx || 0;
+			this.originY = ogy || 0;
+		}
+	}
+	
 	const assets = {
-		player1: 0,
-		player2: 0,
-		player3: 0,
-		player4: 0,
+		player1: [4, 8],
+		player2: [4, 8],
+		player3: [4, 8],
+		player4: [4, 8],
 		errortile: 0,
 		tile0: 0,
 		peterplatform: 0,
+		player_sheet: {sheet: "sheets/player"},
 	};
 	let tiles, tile, tilesIndexed, MAX_TILES;
+	
+	function getSprite(img) {
+		if (typeof img === "string" && assets[img]) img = assets[img];
+		return img;
+	}
+	function drawSprite(ctx, img, x, y, scaleX, scaleY) {
+		ensureType(ctx, "ctx", CanvasRenderingContext2D);
+		let spr = getSprite(img);
+		if (!spr.image) throw new Error(`Sprite ${spr} not found`);
+		ctx.drawImage(
+			spr.image, spr.imageX, spr.imageY, spr.imageWidth, spr.imageHeight,
+			x - spr.originX, y - spr.originY, img.imageWidth * scaleX, img.imageHeight * scaleY
+		);
+	}
+	
 	
 	
 	// utility functions
@@ -58,6 +99,23 @@
 	};
 	const clamp = (val, min, max) => Math.max(min, Math.min(val, max));
 	const ceil = Math.ceil;
+	
+	function ensureType(obj, name, type, allowFalsy = false) {
+		let failed = false;
+		let typeName = "UNKNOWN";
+		if (typeof type === "string" && (typeof obj !== type)) {
+			failed = true;
+			typeName = type;
+		} else if (typeof type === "function" && !(obj instanceof type)) {
+			failed = true;
+			typeName = type.name;
+		}
+		if (failed) {
+			const falsyMsg = allowFalsy ? " or falsy" : "";
+			console.error(`ensureType: ${name} must be a ${typeName}${falsyMsg}, got:`, obj);
+			throw new TypeError(`${name} must be a ${typeName}${falsyMsg}, got ${typeof obj} ${obj}`);
+		}
+	}
 	
 	
 	// Canvas stuff
@@ -522,12 +580,15 @@
 		}
 		draw(ctx) {
 			if (this.storedBlock) {
-				ctx.drawImage(tileGraphic(this.storedBlock), -4, -26, 32, 32);
+				drawSprite(ctx, tileGraphic(this.storedBlock), -4, -26, 1, 1);
 			}
 			
 			let frame = (this.facing === 1 ? 1 : 2);
 			if (this.storedBlock) frame += 2;
-			ctx.drawImage(assets["player" + frame], -4, -8, 32, 32);
+			
+			let suffix = "_" + (this.facing === 1 ? "r" : "l") + (this.storedBlock ? "c" : "");
+			let playerSprite = "player_stand" + suffix + "0";
+			drawSprite(ctx, playerSprite, 0, 0, 1, 1);
 		}
 	}
 	class PeterPlatform extends CollideObj {
@@ -558,7 +619,7 @@
 			this.y = oscillate(this.startY, this.startY + this.moveY, this.moveTime, this.timer);
 		}
 		draw(ctx) {
-			ctx.drawImage(assets.peterplatform, 0, 0, this.w, this.h);
+			drawSprite(ctx, assets.peterplatform, 0, 0, 1, 1);
 		}
 	}
 	
@@ -663,7 +724,7 @@
 				const tx = flr((cx + mouseX) / TILE_SIZE);
 				const ty = flr((cy + mouseY) / TILE_SIZE);
 				ctx.globalAlpha = 0.5;
-				ctx.drawImage(tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE, 32, 32);
+				drawSprite(ctx, tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE, 1, 1);
 			}
 		};
 		
@@ -743,7 +804,7 @@
 				if (!tilemap[y]) continue;
 				for (let x = minx; x < maxx; x++) {
 					if (tilemap[y][x])
-						ctx.drawImage(tileGraphic(tilemap[y][x]), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+						drawSprite(ctx, tileGraphic(tilemap[y][x]), x * TILE_SIZE, y * TILE_SIZE, 1, 1)
 				}
 			}
 			
@@ -824,6 +885,9 @@
 		paused = true;
 		
 		if (items instanceof Function) items = items();
+		for (let i = 0; i < items.length; i++) {
+			if (items[i].length < 3) items[i][2] = {};
+		}
 		const menu = new Menu(items);
 		pauseMenus.push(menu);
 		return menu;
@@ -963,29 +1027,46 @@
 		}],
 	];
 	Menu.levels = () => {
-		const items = levels.map(l => [l.name, () => {
-			editor = true;
-			loadLevel(l);
-			startGame();
-			exitPause();
-		}]);
-		items.unshift(MenuOption.back, ["New Level...", () => {
+		function levelItem(l) {
+			return [l.name, () => {
+				editor = true;
+				loadLevel(l);
+				startGame();
+				exitPause();
+			}, {
+				onSort(index, direction, menu) {
+					const items = menu.items;
+					const newIndex = index + direction;
+					if (newIndex < 0 || newIndex >= items.length || newIndex === index) return;
+					if (!items[newIndex][2].isLevel) return;
+					items.splice(index, 1);
+					items.splice(newIndex, 0, this);
+					saveLevels();
+					return direction;
+				},
+				isLevel: true,
+			}];
+		}
+		const items = levels.map(levelItem);
+		items.unshift(MenuOption.back, ["New Level...", (menu) => {
 			const name = prompt("Name?");
 			if (!name) return true;
-			queueMicrotask(() => {
-				editor = true;
-				exitPause();
-				
-				tmh = 15;
-				tmw = 25;
-				
-				level = {name, tilemap: []};
-				genLevel("flat");
-				
-				levels.push(level);
-				saveLevels();
-				startGame();
-			});
+			
+			let oldLevel = level;
+			let oldTilemap = tilemap;
+			
+			tmh = 15;
+			tmw = 25;
+			level = {name, tilemap: []};
+			genLevel("flat", true);
+			
+			levels.push(level);
+			saveLevels();
+			menu.items.push(levelItem(level));
+			
+			level = oldLevel;
+			tilemap = oldTilemap;
+			return true;
 		}]);
 		return items;
 	};
@@ -1000,6 +1081,13 @@
 		pauseMenus.length = 0;
 	}
 	function drawPause() {
+		if (!onTitle) {
+			ctx.fillStyle = "black";
+			ctx.globalAlpha = 0.5;
+			ctx.fillRect(0, 0, sw, sh)
+			ctx.globalAlpha = 1;
+		}
+		
 		let cx = 16;
 		let cy = 16;
 		ctx.fillStyle = "white";
@@ -1025,26 +1113,66 @@
 			} else {
 				ctx.font = "bold "+fontSize+"px sans-serif";
 			}
-			let text = menu.items[i][0];
+			ctx.fillStyle = "white";
+			
+			let item = menu.items[i];
+			let text = item[0];
 			if (typeof text !== "string") text = text();
+			let prefix = "  ";
+			if (menu.index === i) {
+				if (item[2] && item[2].onSort && pressed("control")) {
+					prefix = "= ";
+					ctx.fillStyle = "yellow";
+				} else {
+					prefix = "> ";
+				}
+			}
+			
 			ctx.fillText(
-				(menu.index === i ? "> " : "  ") +
-				text,
+				prefix + text,
 				cx, cy, sw - cx*2
 			);
 			cy += fontSize;
 		}
+		
+		if (menu.items[menu.index][2] && menu.items[menu.index][2].onSort) {
+			ctx.font = "16px sans-serif";
+			ctx.fillStyle = "white";
+			ctx.textAlign = "left";
+			ctx.textBaseline = "bottom";
+			ctx.fillText(
+				"Ctrl+Up/Down to sort.",
+				8, sh-8, sw-16
+			);
+		}
 	}
 	function stepPause() {
 		const menu = pauseMenus[pauseMenus.length - 1];
-		if (justPressed("up"))
-			menu.index = Math.max(menu.index - 1, 0);
-		if (justPressed("down"))
-			menu.index = Math.min(menu.index + 1, menu.items.length - 1);
+		function clampIndex() {
+			menu.index = Math.max(Math.min(menu.index, menu.items.length - 1), 0);
+		}
+		if (justPressed("up")) {
+			let item = menu.items[menu.index];
+			if (pressed("control") && item[2].onSort) {
+				menu.index += item[2].onSort.call(item, menu.index, -1, menu) || 0;
+			} else {
+				menu.index--;
+			}
+		}
+		clampIndex();
+		if (justPressed("down")) {
+			let item = menu.items[menu.index];
+			if (pressed("control") && item[2].onSort) {
+				menu.index += item[2].onSort.call(item, menu.index, 1, menu) || 0;
+			} else {
+				menu.index++;
+			}
+		}
+		clampIndex();
 		if (justPressed("enter") || justPressed("spacebar") || (!menu.inescapable && justPressed("esc"))) {
 			if (justPressed("esc")) menu.index = 0;
 			let returnVal = menu.items[menu.index][1];
-			if (returnVal instanceof Function) returnVal = returnVal();
+			if (returnVal instanceof Function) returnVal = returnVal(menu);
 			if (paused) {
 				if (!returnVal) {
 					pauseMenus.pop();
@@ -1133,13 +1261,28 @@
 		ctx.restore();
 	}
 	
-	Object.keys(assets).forEach(function(key) {
+	function imgPromise(src) {
+		return new Promise((res, rej) => {
+			const img = new Image();
+			img.src = src;
+			img.onload = function() {
+				res(img);
+			};
+			img.onerror = function(e) {
+				rej(e);
+			};
+		});
+	}
+	
+	const baseDir = "./assets/";
+	Object.keys(assets).forEach(async function(key) {
 		allAssets++;
-		const filename = "./sprites/" + key + ".png";
-		const img = new Image();
-		img.src = filename;
-		assets[key] = img;
-		img.onload = function() {
+		const val = assets[key];
+		
+		let thisLoaded = false;
+		function loadedAsset() {
+			if (thisLoaded) return;
+			thisLoaded = true;
 			loadedAssets++;
 			draw();
 			if (loadedAssets === allAssets && !loadErrors.length) {
@@ -1148,14 +1291,65 @@
 				canvas.style.background = "#115";
 				requestAnimationFrame(step);
 			}
-		};
-		img.onerror = function(e) {
+		}
+		function loadFailed(e) {
+			if (thisLoaded) return;
+			thisLoaded = true;
 			loadedAssets++;
+			console.error("Could not load " + filename + ": ", e);
 			loadErrors.push(
 				"Could not load " + filename + "."
 			);
 			draw();
-		};
+		}
+		
+		if (typeof val === "object" && val.sheet) {
+			// Load a spritesheeet
+			delete assets[val];
+			const sheetJson = baseDir + val.sheet + ".json";
+			const sheetPng = baseDir + val.sheet + ".png";
+			
+			Promise.all([
+				fetch(sheetJson).then(res => {
+					if (res.ok) return res.json();
+					throw res.status + " " + res.statusText;
+				}),
+				imgPromise(sheetPng),
+			]).then(([json, sheet]) => {
+				let ogx = 0;
+				let ogy = 0;
+				if (sheet.meta && sheet.meta.slices) {
+					for (const slice of sheet.meta.slices) {
+						if (slice.name !== "origin") continue;
+						if (!slice.keys[0]) continue;
+						ogx = slice.keys[0].bounds.x;
+						ogy = slice.keys[0].bounds.y;
+					}
+				}
+				for (const [name, frame] of Object.entries(json.frames)) {
+					if (frame.rotated) throw new Error("we need to handle rotated frames because of: " + name);
+					const def = new SpriteDef(sheet, ogx - frame.spriteSourceSize.x, ogy - frame.spriteSourceSize.y);
+					def.imageX = frame.frame.x;
+					def.imageY = frame.frame.y;
+					def.width = frame.sourceSize.w;
+					def.height = frame.sourceSize.h;
+					assets[name] = def;
+				}
+				loadedAsset();
+			}).catch(loadFailed);
+		} else {
+			const filename = baseDir + key + ".png";
+			const img = new Image();
+			img.src = filename;
+			img.onload = function() {
+				const args = Array.isArray(val) ? val : [];
+				assets[key] = new SpriteDef(img, ...args);
+				loadedAsset();
+			};
+			img.onerror = function(e) {
+				loadFailed(e);
+			};
+		}
 	});
 	
 	window.onresize = resizeGame;
