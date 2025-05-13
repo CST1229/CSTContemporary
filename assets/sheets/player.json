@@ -793,11 +793,16 @@
    { "name": "jump_lc", "from": 72, "to": 75, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "fall_lc", "from": 76, "to": 79, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "turn_r", "from": 80, "to": 81, "direction": "forward", "repeat": "1", "color": "#000000ff" },
-   { "name": "turn_l", "from": 82, "to": 83, "direction": "forward", "color": "#000000ff" },
+   { "name": "turn_l", "from": 82, "to": 83, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "turn_rc", "from": 84, "to": 85, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "turn_lc", "from": 86, "to": 87, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "pickup", "from": 88, "to": 91, "direction": "forward", "repeat": "1", "color": "#000000ff" },
    { "name": "putdown", "from": 92, "to": 95, "direction": "forward", "repeat": "1", "color": "#000000ff" }
+  ],
+  "layers": [
+   { "name": "arm_bottom", "opacity": 255, "blendMode": "normal" },
+   { "name": "body", "opacity": 255, "blendMode": "normal" },
+   { "name": "arm_top", "opacity": 255, "blendMode": "normal" }
   ],
   "slices": [
    { "name": "origin", "color": "#0000ffff", "keys": [{ "frame": 0, "bounds": {"x": 12, "y": 16, "w": 24, "h": 24 } }] }

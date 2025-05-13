@@ -96,10 +96,23 @@
 			if (this.length === 0) throw new Error(`Tag ${name} has 0 length`);
 			frameNo = Math.floor(+frameNo);
 			if (frameNo < 0) return this.getFrameRepeat(0 - frameNo);
-			let repeatNo = frameNo / this.length;
+			const repeatNo = frameNo / this.length;
 			// Repeating has ended, so just return the last frame
 			if (repeatNo >= this.repeat) return this.frames[this.length - 1];
 			return this.frames[frameNo % this.length];
+		}
+		/**
+		 * Returns whether the frame number is past the end of this tag or not.
+		 * Always returns false for infinitely looping tags.
+		 */
+		isFrameEnd(frameNo) {
+			if (this.length === 0) throw new Error(`Tag ${name} has 0 length`);
+			frameNo = Math.floor(+frameNo);
+			if (frameNo < 0) return this.isFrameEnd(0 - frameNo);
+			const repeatNo = frameNo / this.length;
+			// Repeating has ended, so just return the last frame
+			if (repeatNo >= this.repeat) return true;
+			return false;
 		}
 	}
 	/**
@@ -572,6 +585,7 @@
 	}
 	class Player extends CollideObj {
 		facing = 1;
+		prevFacing = 1;
 		falling = 0;
 		jumpBuffer = 0;
 		storedBlock = 0;
@@ -673,21 +687,41 @@
 		doAnimation(dt) {
 			let anim = this.animation;
 			let animFPS = 0;
-			if (this.falling <= this.coyoteTime) {
-				if (Math.abs(this.hsp) <= 10) {
-					anim = "stand";
-					animFPS = 1000 / 200;
-				} else {
-					anim = "walk";
-					animFPS = 1000 / 80;
+			
+			let specialAnims = false;
+			if (anim === "turn") {
+				animFPS = 1000 / 80;
+				if (!this.animEnded()) {
+					specialAnims = true;
 				}
-			} else {
-				animFPS = 1000 / 100;
-				if (this.vsp >= 0) {
-					anim = "fall";
-				} else {
-					anim = "jump";
+			} if (anim === "pickup" || anim === "putdown") {
+				animFPS = 1000 / 50;
+				if (!this.animEnded()) {
+					specialAnims = true;
 				}
+			}
+			if (!specialAnims) {
+				if (this.falling <= this.coyoteTime) {
+					if (Math.abs(this.hsp) <= 10) {
+						anim = "stand";
+						animFPS = 1000 / 200;
+					} else {
+						anim = "walk";
+						animFPS = 1000 / 80;
+					}
+				} else {
+					animFPS = 1000 / 50;
+					if (this.vsp >= 0) {
+						anim = "fall";
+					} else {
+						anim = "jump";
+					}
+				}
+			}
+			
+			if (this.prevFacing !== this.facing && this.falling <= this.coyoteTime) {
+				anim = "turn";
+				this.prevFacing = this.facing;
 			}
 			
 			if (anim !== this.animation) {
@@ -698,13 +732,19 @@
 			}
 		}
 		
+		getAnimTag() {
+			let suffix = "_" + (this.facing === 1 ? "r" : "l") + (this.storedBlock ? "c" : "");
+			return this.sprite.getTag(this.animation + suffix) || this.sprite.getTag(this.animation);
+		}
+		animEnded() {
+			return this.getAnimTag().isFrameEnd(this.frame);
+		}
 		draw(ctx) {
 			if (this.storedBlock) {
 				drawSprite(ctx, tileGraphic(this.storedBlock), -4, -26);
 			}
 			
-			let suffix = "_" + (this.facing === 1 ? "r" : "l") + (this.storedBlock ? "c" : "");
-			drawSprite(ctx, this.sprite.getTag(this.animation + suffix).getFrameRepeat(this.frame), 0, 0);
+			drawSprite(ctx, this.getAnimTag().getFrameRepeat(this.frame), 0, 0);
 		}
 	}
 	class PeterPlatform extends CollideObj {
