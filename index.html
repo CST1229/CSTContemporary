@@ -37,20 +37,28 @@
 		imageY = 0;
 		imageWidth = 0;
 		imageHeight = 0;
-		width = 0;
-		height = 0;
 		
 		originX = 0;
 		originY = 0;
+		
+		// The size and origin of the sprite's "canvas"; the uncropped region of the sprite.
+		canvasWidth = 0;
+		canvasHeight = 0;
+		canvasOriginX = 0;
+		canvasOriginY = 0;
+		
+		data = Object.create(null);
 		
 		constructor(image, ogx = 0, ogy = 0, w = 0, h = 0) {
 			this.image = image;
 			this.imageWidth = image.naturalWidth;
 			this.imageHeight = image.naturalHeight;
-			this.width = w || image.naturalWidth;
-			this.height = h || image.naturalHeight;
+			this.canvasWidth = w || image.naturalWidth;
+			this.canvasHeight = h || image.naturalHeight;
 			this.originX = ogx || 0;
 			this.originY = ogy || 0;
+			this.canvasOriginX = ogx || 0;
+			this.canvasOriginY = ogy || 0;
 		}
 	}
 	
@@ -585,10 +593,12 @@
 	}
 	class Player extends CollideObj {
 		facing = 1;
-		prevFacing = 1;
 		falling = 0;
 		jumpBuffer = 0;
 		storedBlock = 0;
+		
+		prevFacing = this.facing;
+		prevStoredBlock = this.storedBlock;
 		
 		w = 24;
 		h = 24;
@@ -695,7 +705,7 @@
 					specialAnims = true;
 				}
 			} if (anim === "pickup" || anim === "putdown") {
-				animFPS = 1000 / 50;
+				animFPS = 1000 / 33;
 				if (!this.animEnded()) {
 					specialAnims = true;
 				}
@@ -719,8 +729,13 @@
 				}
 			}
 			
-			if (this.prevFacing !== this.facing && this.falling <= this.coyoteTime) {
-				anim = "turn";
+			if (this.prevStoredBlock !== this.storedBlock) {
+				anim = this.storedBlock ? "pickup" : "putdown";
+				this.prevStoredBlock = this.storedBlock;
+			} else if (this.prevFacing !== this.facing && anim !== "pickup" && anim !== "putdown") {
+				if (this.falling <= this.coyoteTime) {
+					anim = "turn";
+				}
 				this.prevFacing = this.facing;
 			}
 			
@@ -739,12 +754,21 @@
 		animEnded() {
 			return this.getAnimTag().isFrameEnd(this.frame);
 		}
-		draw(ctx) {
+		
+		drawStoredBlock(ctx, frame) {
 			if (this.storedBlock) {
-				drawSprite(ctx, tileGraphic(this.storedBlock), -4, -26);
+				const tx = -4;
+				const ty = -frame.canvasOriginY + frame.data.blockOffset + 2;
+				drawSprite(ctx, tileGraphic(this.storedBlock), tx, ty);
 			}
+		}
+		draw(ctx) {
+			const frame = this.getAnimTag().getFrameRepeat(this.frame);
+			const blockInFront = this.animation === "pickup";
 			
-			drawSprite(ctx, this.getAnimTag().getFrameRepeat(this.frame), 0, 0);
+			if (!blockInFront) this.drawStoredBlock(ctx, frame);
+			drawSprite(ctx, frame, 0, 0);
+			if (blockInFront) this.drawStoredBlock(ctx, frame);
 		}
 	}
 	class PeterPlatform extends CollideObj {
@@ -1490,6 +1514,84 @@ Middle click tap: Pick objects
 		});
 	}
 	
+	function addSpriteSheet(assetName,json, sheetImage) {
+		const sheetDef = new SpriteSheetDef();
+		sheetDef.name = assetName;
+		assets[assetName] = sheetDef;
+		
+		let ogx = 0;
+		let ogy = 0;
+		if (json.meta && json.meta.slices) {
+			for (const slice of json.meta.slices) {
+				if (slice.name !== "origin") continue;
+				if (!slice.keys[0]) continue;
+				ogx = slice.keys[0].bounds.x;
+				ogy = slice.keys[0].bounds.y;
+			}
+		}
+		
+		const tags = (json.meta && json.meta.frameTags) || [];
+		sheetDef.defineTag("");
+		for (const tag of tags) {
+			if (tag.direction !== "forward") throw new Error(`Tag directions other than forward are not supported yet (direction ${tag.direction} for ${tag.name})`);
+			sheetDef.defineTag(tag.name, tag.repeat);
+		}
+		
+		let i = 0;
+		for (let [frameName, frame] of Object.entries(json.frames)) {
+			if (frame.filename) frameName = frame.filename;
+			if (frame.rotated) throw new Error("we need to handle rotated frames because of: " + frameName);
+			const def = new SpriteDef(
+				sheetImage, ogx - frame.spriteSourceSize.x, ogy - frame.spriteSourceSize.y,
+			);
+			def.imageX = frame.frame.x;
+			def.imageY = frame.frame.y;
+			def.imageWidth = frame.spriteSourceSize.w;
+			def.imageHeight = frame.spriteSourceSize.h;
+			def.canvasWidth = frame.sourceSize.w
+			def.canvasHeight = frame.sourceSize.h
+			def.canvasOriginX = ogx;
+			def.canvasOriginY = ogy;
+			if (frameName) assets[frameName] = def;
+			
+			sheetDef.checkTag("").addFrame(def);
+			for (const tag of tags) {
+				if (tag.from <= i && i <= tag.to) {
+					sheetDef.checkTag(tag.name).addFrame(def);
+				}
+			}
+			i++;
+		}
+		
+		function parseData(value, type) {
+			if (type === "number") return +value;
+			else if (type === "boolean") return !!value && value !== "false";
+			return value.toString();
+		}
+		
+		if (json.meta && json.meta.layers) {
+			const frames = sheetDef.checkTag("").frames;
+			for (const layer of json.meta.layers) {
+				if (!layer.name.startsWith("data:")) continue;
+				const name = layer.name.substring("data:".length);
+				
+				let type = layer.data;
+				if (!type) type = "string";
+				let defaultValue = undefined;
+				
+				const equalsIndex = type.indexOf("=");
+				if (equalsIndex >= 0) {
+					defaultValue = type.substring(equalsIndex + 1);
+					type = type.substring(0, equalsIndex);
+					defaultValue = parseData(defaultValue, type);
+				}
+				for (const cel of layer.cels) {
+					if (cel.data) frames[cel.frame].data[name] = parseData(cel.data, type);
+				}
+			}
+		}
+	}
+	
 	const baseDir = "./assets/";
 	Object.keys(assets).forEach(async function(assetName) {
 		allAssets++;
@@ -1532,49 +1634,7 @@ Middle click tap: Pick objects
 				}),
 				imgPromise(sheetPng),
 			]).then(([json, sheetImage]) => {
-				const sheetDef = new SpriteSheetDef();
-				sheetDef.name = assetName;
-				assets[assetName] = sheetDef;
-				
-				let ogx = 0;
-				let ogy = 0;
-				if (json.meta && json.meta.slices) {
-					for (const slice of json.meta.slices) {
-						if (slice.name !== "origin") continue;
-						if (!slice.keys[0]) continue;
-						ogx = slice.keys[0].bounds.x;
-						ogy = slice.keys[0].bounds.y;
-					}
-				}
-				
-				const tags = (json.meta && json.meta.frameTags) || [];
-				sheetDef.defineTag("");
-				for (const tag of tags) {
-					if (tag.direction !== "forward") throw new Error(`Tag directions other than forward are not supported yet (direction ${tag.direction} for ${tag.name})`);
-					sheetDef.defineTag(tag.name, tag.repeat);
-				}
-				
-				let i = 0;
-				for (const [frameName, frame] of Object.entries(json.frames)) {
-					if (frame.rotated) throw new Error("we need to handle rotated frames because of: " + frameName);
-					const def = new SpriteDef(
-						sheetImage, ogx - frame.spriteSourceSize.x, ogy - frame.spriteSourceSize.y,
-						frame.sourceSize.w, frame.sourceSize.h
-					);
-					def.imageX = frame.frame.x;
-					def.imageY = frame.frame.y;
-					def.imageWidth = frame.spriteSourceSize.w;
-					def.imageHeight = frame.spriteSourceSize.h;
-					assets[frameName] = def;
-					
-					sheetDef.checkTag("").addFrame(frameName);
-					for (const tag of tags) {
-						if (tag.from <= i && i <= tag.to) {
-							sheetDef.checkTag(tag.name).addFrame(frameName);
-						}
-					}
-					i++;
-				}
+				addSpriteSheet(assetName, json, sheetImage);
 				loadedAsset();
 			}).catch(loadFailed);
 		} else {
