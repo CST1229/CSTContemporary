@@ -32,13 +32,41 @@
 	 * Representation of a sprite, with support for pulling out from spritesheets.
 	 */
 	class SpriteDef {
+		/**
+		 * The image used for this sprite.
+		 * @type {Image}
+		 */
 		image = null;
+		/**
+		 * X position within the image of this sprite.
+		 * @type {number}
+		 */
 		imageX = 0;
+		/**
+		 * Y position within the image of this sprite.
+		 * @type {number}
+		 */
 		imageY = 0;
+		/**
+		 * Width within the image of this sprite.
+		 * @type {number}
+		 */
 		imageWidth = 0;
+		/**
+		 * Height within the image of this sprite.
+		 * @type {number}
+		 */
 		imageHeight = 0;
 		
+		/**
+		 * The X center of this sprite.
+		 * @type {number}
+		 */
 		originX = 0;
+		/**
+		 * The Y center of this sprite.
+		 * @type {number}
+		 */
 		originY = 0;
 		
 		// The size and origin of the sprite's "canvas"; the uncropped region of the sprite.
@@ -47,6 +75,10 @@
 		canvasOriginX = 0;
 		canvasOriginY = 0;
 		
+		/**
+		 * User-defined frame data.
+		 * @type {{[index: string]: any}}
+		 */
 		data = Object.create(null);
 		
 		constructor(image, ogx = 0, ogy = 0, w = 0, h = 0) {
@@ -63,17 +95,30 @@
 	}
 	
 	/**
-	 * Representation of an Aseprite tag.
+	 * Representation of an Aseprite tag (used for animations).
 	 */
 	class SpriteSheetTagDef {
 		/**
 		 * The name of this tag.
 		 * Empty tags represent all frames in the sprite.
+		 * @type {string}
 		 */
 		name = "";
+		/**
+		 * All frames in this tag.
+		 * @type {Array<SpriteDef>}
+		 */
 		frames = [];
+		/**
+		 * How many times this tag should loop.
+		 * @type {number}
+		 */
 		repeat = Infinity;
 		
+		/**
+		 * Get the number of frames in this tag.
+		 * @returns {number}
+		 */
 		get length() {
 			return this.frames.length;
 		}
@@ -93,6 +138,9 @@
 		addFrame(asset) {
 			this.frames.push(asset);
 		}
+		/**
+		 * Get a frame from this tag, NOT accounting for looping, etc..
+		 */
 		getFrame(frameNo) {
 			if (this.length === 0) throw new Error(`Tag ${name} has 0 length`);
 			return this.frames[frameNo];
@@ -127,19 +175,48 @@
 	 * Representation of an Aseprite-based animation.
 	 */
 	class SpriteSheetDef {
+		/**
+		 * The name of this spritesheet.
+		 * @type {string}
+		 */
 		name = "";
+		/**
+		 * All tags in this sprite. Tag "" represents all frames.
+		 * @type {{[index: string]: SpriteSheetTagDef}}
+		 */
 		tags = Object.create(null);
 		
+		/**
+		 * Creates a new tag.
+		 * @param {string} name The name of this tag.
+		 * @param {number=Infinity} repeat How many times this tag should repeat.
+		 * @returns {SpriteSheetTagDef} The created tag.
+		 */
 		defineTag(name, repeat = Infinity) {
-			this.tags[name] = new SpriteSheetTagDef(name, repeat);
+			return this.tags[name] = new SpriteSheetTagDef(name, repeat);
 		}
+		/**
+		 * Gets a tag, or throws an error if it doesn't exist.
+		 * @param {string} name The name of the tag.
+		 * @returns {SpriteSheetTagDef} The tag.
+		 */
 		checkTag(name) {
 			if (!this.tags[name]) throw new Error(`Tag ${name} does not exist in ${this.name}`);
 			return this.tags[name];
 		}
+		/**
+		 * Gets a tag, or undefined if it doesn't exist.
+		 * @param {string} name The name of the tag.
+		 * @returns {SpriteSheetTagDef | undefined} The tag.
+		 */
 		getTag(name) {
 			return this.tags[name];
 		}
+		
+		/**
+		 * Returns whether a tag exists or not.
+		 * @returns {bool}
+		 */
 		hasTag(name) {
 			return !!this.tags[name];
 		}
@@ -151,7 +228,26 @@
 		tile0: 0,
 		peterplatform: 0,
 	};
-	let tiles, tile, tilesIndexed, MAX_TILES;
+	/**
+	 * Metadata for each tile, including names and objects.
+	 * @type {object}
+	 */
+	let tiles;
+	/**
+	 * The tile enum.
+	 * @type {{[index: string]: any}}
+	 */
+	let tile;
+	/**
+	 * The inverse tile enum.
+	 * @type {{[index: any]: string}}
+	 */
+	let tilesIndexed;
+	/**
+	 * The number of tiles.
+	 * @type {number}
+	 */
+	let MAX_TILES = 0;
 	
 	function getSprite(img) {
 		if (typeof img === "string" && assets[img]) img = assets[img];
@@ -487,10 +583,16 @@
 		return collisions;
 	}
 	
+	/**
+	 * The main object class.
+	 */
 	class Obj {
 		// apparently instanceof is slow, so optimize
 		isHitboxObj = false;
 	}
+	/**
+	 * Objects that have a hitbox, and may touch other objects.
+	 */
 	class HitboxObj extends Obj {
 		isHitboxObj = true;
 		
@@ -500,6 +602,9 @@
 		h = 0;
 		solid = false;
 	}
+	/**
+	 * Objects that have a hitbox and collide with solids and/or objects in some way.
+	 */
 	class CollideObj extends HitboxObj {
 		hsp = 0;
 		vsp = 0;
@@ -562,7 +667,6 @@
 					onHitWall.call(this, oldHsp, "right");
 				}
 			}
-			/*
 			if (this.hitsObjects && oldHsp != 0) {
 				if (oldHsp > 0) {
 					const colls = getHitboxCollisions(this.x, this.y, this.w, this.h, this, false);
@@ -584,13 +688,15 @@
 					}
 				}
 			}
-			*/
 		}
 		move(dt, callbacks = {}) {
 			this.moveX(dt, callbacks);
 			this.moveY(dt, callbacks);
 		}
 	}
+	/**
+	 * The player, duh.
+	 */
 	class Player extends CollideObj {
 		facing = 1;
 		falling = 0;
@@ -803,8 +909,8 @@
 		}
 	}
 	
-	function WinText() {
-		this.drawGUI = function(ctx) {
+	class WinText extends Obj {
+		drawGUI(ctx) {
 			ctx.fillStyle = "white";
 			ctx.textAlign = "center";
 			ctx.textBaseline = "top";
@@ -819,10 +925,10 @@
 				"(You... DIED!!!)",
 				sw/2, sh/2+16
 			);
-		};
+		}
 	}
-	function Playtest() {
-		this.step = function() {
+	class Playtest extends Obj {
+		step() {
 			if (justPressed("0")) {
 				queueMicrotask(() => {
 					editor = true;
@@ -830,88 +936,92 @@
 					startGame();
 				});
 			}
-		};
-	}
-	function Editor() {
-		let scrolledX = 0;
-		let scrolledY = 0;
-		let lastMouseX = mouseX;
-		let lastMouseY = mouseY;
-		let couldPick = false;
-		
-		let brush = tile.tile;
-		
-		// 2-finger touch scrolling, mainly
-		function onScroll(e) {
-			if (paused) return;
-			e.preventDefault();
-			scrolledX += e.deltaX / gameScale;
-			scrolledY += e.deltaY / gameScale;
 		}
-		canvas.addEventListener("wheel", onScroll);
-		
-		const moveSpeed = TILE_SIZE * 15;
-		this.step = function(dt) {
-			const joystickX = pressed("right") - pressed("left");
-			const joystickY = pressed("down") - pressed("up");
-			camX += joystickX * dt * moveSpeed + scrolledX;
-			camY += joystickY * dt * moveSpeed + scrolledY;
-			if (justPressed("mmb")) couldPick = true;
-			if (mouseX != null && mouseY != null && pressed("mmb")) {
-				if (lastMouseX - mouseX != 0 || lastMouseY - mouseY != 0) couldPick = false;
-				camX += lastMouseX - mouseX;
-				camY += lastMouseY - mouseY;
+	}
+	class Editor extends Obj {
+		constructor() {
+			super();
+			
+			let scrolledX = 0;
+			let scrolledY = 0;
+			let lastMouseX = mouseX;
+			let lastMouseY = mouseY;
+			let couldPick = false;
+			
+			let brush = tile.tile;
+			
+			// 2-finger touch scrolling, mainly
+			function onScroll(e) {
+				if (paused) return;
+				e.preventDefault();
+				scrolledX += e.deltaX / gameScale;
+				scrolledY += e.deltaY / gameScale;
 			}
-			[camX, camY] = getClampedCameraPos(false);
-			scrolledX = 0;
-			scrolledY = 0;
-			lastMouseX = mouseX;
-			lastMouseY = mouseY;
+			canvas.addEventListener("wheel", onScroll);
 			
-			if (justPressed("1")) brush--;
-			if (justPressed("2")) brush++;
-			brush = clamp(brush, 0, MAX_TILES);
-			
-			if (mouseX != null) {
-				if (pressed("lmb") || pressed("rmb")) {
-					couldPick = false;
-					const tl = pressed("rmb") ? tile.none : brush;
-					const [cx, cy] = getClampedCameraPos();
-					const tx = flr((cx + mouseX) / TILE_SIZE);
-					const ty = flr((cy + mouseY) / TILE_SIZE);
-					setTile(tx, ty, tl);
-				} else if (!pressed("mmb") && couldPick) {
-					couldPick = false;
-					const [cx, cy] = getClampedCameraPos();
-					const tx = flr((cx + mouseX) / TILE_SIZE);
-					const ty = flr((cy + mouseY) / TILE_SIZE);
-					brush = getTile(tx, ty, brush);
+			const moveSpeed = TILE_SIZE * 15;
+			this.step = function(dt) {
+				const joystickX = pressed("right") - pressed("left");
+				const joystickY = pressed("down") - pressed("up");
+				camX += joystickX * dt * moveSpeed + scrolledX;
+				camY += joystickY * dt * moveSpeed + scrolledY;
+				if (justPressed("mmb")) couldPick = true;
+				if (mouseX != null && mouseY != null && pressed("mmb")) {
+					if (lastMouseX - mouseX != 0 || lastMouseY - mouseY != 0) couldPick = false;
+					camX += lastMouseX - mouseX;
+					camY += lastMouseY - mouseY;
 				}
-			}
+				[camX, camY] = getClampedCameraPos(false);
+				scrolledX = 0;
+				scrolledY = 0;
+				lastMouseX = mouseX;
+				lastMouseY = mouseY;
+				
+				if (justPressed("1")) brush--;
+				if (justPressed("2")) brush++;
+				brush = clamp(brush, 0, MAX_TILES);
+				
+				if (mouseX != null) {
+					if (pressed("lmb") || pressed("rmb")) {
+						couldPick = false;
+						const tl = pressed("rmb") ? tile.none : brush;
+						const [cx, cy] = getClampedCameraPos();
+						const tx = flr((cx + mouseX) / TILE_SIZE);
+						const ty = flr((cy + mouseY) / TILE_SIZE);
+						setTile(tx, ty, tl);
+					} else if (!pressed("mmb") && couldPick) {
+						couldPick = false;
+						const [cx, cy] = getClampedCameraPos();
+						const tx = flr((cx + mouseX) / TILE_SIZE);
+						const ty = flr((cy + mouseY) / TILE_SIZE);
+						brush = getTile(tx, ty, brush);
+					}
+				}
+				
+				if (justPressed("0")) {
+					queueMicrotask(() => {
+						editor = false;
+						saveLevels();
+						startGame(true);
+					});
+				}
+			};
 			
-			if (justPressed("0")) {
-				queueMicrotask(() => {
-					editor = false;
-					saveLevels();
-					startGame(true);
-				});
-			}
-		};
-		
-		this.draw = function() {
-			if (paused) return;
-			if (mouseX != null && !pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
-				const [cx, cy] = getClampedCameraPos();
-				const tx = flr((cx + mouseX) / TILE_SIZE);
-				const ty = flr((cy + mouseY) / TILE_SIZE);
-				ctx.globalAlpha = 0.5;
-				drawSprite(ctx, tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE);
-			}
-		};
-		
-		this.dispose = function() {
-			canvas.removeEventListener("scroll", onScroll);
-		};
+			this.draw = function() {
+				if (paused) return;
+				if (mouseX != null && !pressed("rmb") && !pressed("lmb") && !pressed("mmb")) {
+					const [cx, cy] = getClampedCameraPos();
+					const tx = flr((cx + mouseX) / TILE_SIZE);
+					const ty = flr((cy + mouseY) / TILE_SIZE);
+					ctx.globalAlpha = 0.5;
+					drawSprite(ctx, tileGraphic(brush), tx * TILE_SIZE, ty * TILE_SIZE);
+				}
+			};
+			
+			this.dispose = function() {
+				canvas.removeEventListener("scroll", onScroll);
+			};
+		}
 	}
 	
 	function getClampedCameraPos(rounded = true) {
@@ -1116,7 +1226,7 @@
 			if (!levels[0]) return true;
 			editor = false;
 			loadLevel(levels[0]);
-			startGame();
+			startGame(true);
 		}],
 		MenuOption.levels,
 		//MenuOption.stoneSimulator,
@@ -1449,9 +1559,9 @@ Middle click tap: Pick objects
 			if (playtest) {
 				objs.push(new Playtest());
 				// stone sim stuff
-				//tmw = 50;
-				//tmh = lengthHeights[gameLength];
-				//genLevel("random");
+				// tmw = 50;
+				// tmh = lengthHeights[gameLength];
+				// genLevel("random");
 			}
 			
 			for (let y = 0; y < tmh; y++) for (let x = 0; x < tmw; x++) {
