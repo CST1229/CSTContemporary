@@ -701,6 +701,7 @@
 		facing = 1;
 		falling = 0;
 		jumpBuffer = 0;
+		jumping = false;
 		storedBlock = 0;
 		
 		prevFacing = this.facing;
@@ -740,12 +741,16 @@
 				this.hsp = approach(this.hsp, 0, this.friction * dt);
 			
 			this.vsp += this.grav * dt;
+			if (this.jumping && !pressed("up") && this.vsp < 0) {
+				this.vsp = approach(this.vsp, 0, this.grav * dt * 3);
+			}
 			this.hsp = Math.min(Math.max(this.hsp, -this.maxSpeed), this.maxSpeed);
 			
 			this.falling += dt;
 			this.move(dt, {
 				onHitFloor() {
 					this.falling = 0;
+					this.jumping = false;
 				},
 			});
 			
@@ -754,9 +759,9 @@
 				this.falling = 999;
 				this.jumpBuffer = 0;
 				this.vsp = this.jumpSpeed;
+				this.jumping = true;
 			}
 			this.jumpBuffer = approach(this.jumpBuffer, 0, dt);
-			
 			
 			if (justPressed("spacebar")) {
 				const collX = this.x + this.w/2;
